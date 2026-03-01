@@ -1,0 +1,233 @@
+{
+    "game_settings": {
+        "cards_per_player": 5,
+        "min_players": 2,
+        "max_players": 10,
+        "default_decks": 1,
+        "decks_scaling": [
+            {"max_players": 4, "decks": 1},
+            {"max_players": 7, "decks": 2},
+            {"max_players": 10, "decks": 3}
+        ]
+    },
+    "card_rules": {
+        "special_cards": [
+            {
+                "rank": "5",
+                "effect": "skip_next",
+                "description": "Playing a 5 skips the next player"
+            },
+            {
+                "rank": "A",
+                "effect": "reverse",
+                "description": "Playing an Ace reverses the play direction"
+            },
+            {
+                "rank": "7",
+                "effect": "say_have_a_nice_day",
+                "consecutive_modifier": "very",
+                "description": "Playing a 7 requires the player to say 'have a (very * number of consecutive 7s before this) nice day'. E.g. first 7: 'have a nice day', second consecutive 7: 'have a very nice day', third: 'have a very very nice day', etc."
+            },
+            {
+                "rank": "10",
+                "effect": "name_beatles_member",
+                "valid_names": ["John", "Paul", "George", "Ringo", "John Lennon", "Paul McCartney", "George Harrison", "Ringo Starr"],
+                "description": "Playing a 10 requires the player to name a member of the Beatles"
+            },
+            {
+                "rank": "J",
+                "effect": "change_suit_race",
+                "cannot_play_on": ["J"],
+                "description": "Playing a Jack means any player may call out a suit; the first player to name a suit changes the active suit to that suit. A Jack cannot be played on another Jack."
+            },
+            {
+                "rank": "Q",
+                "effect": "play_again",
+                "description": "Playing a Queen allows the player to take another turn immediately"
+            },
+            {
+                "rank": "K",
+                "effect": "hit_player",
+                "description": "Playing a King requires the player to hit (tap/slap) another player"
+            }
+        ],
+        "suit_rules": [
+            {
+                "suit": "spades",
+                "on_play": "announce_spades",
+                "penalty_cards": 2,
+                "description": "Must say '(value) of spades' when playing a spade (e.g. '5 of spades', 'King of spades')"
+            },
+            {
+                "suit": "spades",
+                "rank": "A",
+                "on_play": "ace_of_spades_song",
+                "penalty_cards": 2,
+                "description": "When playing the Ace of Spades, the player must sing 'flying swooping ace of spades, doo dah doo dah' and all other players must sing 'doo dah doo dah'"
+            },
+            {
+                "suit": "hearts",
+                "on_play": "knock",
+                "penalty_cards": 2,
+                "description": "Must knock on the table when playing a heart"
+            }
+        ],
+        "consecutive_rules": {
+            "threshold": 3,
+            "effect": "throw_card",
+            "description": "When 3 cards of the same value are played consecutively, the 3rd player must throw a card at another player (that player must take it). Each subsequent player who continues playing the same value must also throw a card at any player.",
+            "special_case": {
+                "rank": "6",
+                "announcement": "evil card",
+                "description": "If the 3 consecutive cards are 6's, 'evil card' must be announced"
+            }
+        },
+        "play_matching": {
+            "must_match": "suit_or_rank",
+            "jack_exception": true,
+            "description": "To play a card it must match the top card's suit or rank. Jacks are excluded from the rank-matching requirement (since they change suit)."
+        }
+    },
+    "speech_rules": [
+        {
+            "name": "announce_spades",
+            "trigger": "play_card",
+            "condition": "card_suit == 'spades' and not (card_rank == 'A')",
+            "required_phrase_template": "{value} of spades",
+            "penalty_cards": 2,
+            "description": "Must say '(value) of spades' when playing a spade",
+            "can_be_disputed": true
+        },
+        {
+            "name": "ace_of_spades_song",
+            "trigger": "play_card",
+            "condition": "card_suit == 'spades' and card_rank == 'A'",
+            "required_phrase_player": "flying swooping ace of spades, doo dah doo dah",
+            "required_phrase_others": "doo dah doo dah",
+            "penalty_cards": 2,
+            "description": "Ace of Spades: player sings 'flying swooping ace of spades, doo dah doo dah', all others must sing 'doo dah doo dah'",
+            "applies_to": "all_players",
+            "can_be_disputed": true
+        },
+        {
+            "name": "have_a_nice_day",
+            "trigger": "play_card",
+            "condition": "card_rank == '7'",
+            "required_phrase_template": "have a {very_chain} nice day",
+            "very_chain_rule": "one 'very' per consecutive 7 played before this one (0 for the first 7, 1 for the second, etc.)",
+            "penalty_cards": 2,
+            "description": "Must say 'have a (very * N) nice day' when playing a 7, where N is the number of consecutive 7s played before this one",
+            "can_be_disputed": true
+        },
+        {
+            "name": "name_beatles_member",
+            "trigger": "play_card",
+            "condition": "card_rank == '10'",
+            "valid_names": ["John", "Paul", "George", "Ringo", "John Lennon", "Paul McCartney", "George Harrison", "Ringo Starr"],
+            "penalty_cards": 2,
+            "description": "Must name a member of the Beatles when playing a 10",
+            "can_be_disputed": true
+        },
+        {
+            "name": "knock_on_hearts",
+            "trigger": "play_card",
+            "condition": "card_suit == 'hearts'",
+            "action": "knock",
+            "penalty_cards": 2,
+            "description": "Must knock on the table when playing a heart",
+            "applies_to": "current_player",
+            "can_be_disputed": true
+        },
+        {
+            "name": "last_card",
+            "trigger": "hand_size",
+            "condition": "hand_size == 1",
+            "required_phrases": ["last card"],
+            "penalty_cards": 2,
+            "description": "Must announce 'last card' when down to one card",
+            "can_be_disputed": true
+        },
+        {
+            "name": "mao",
+            "trigger": "hand_size",
+            "condition": "hand_size == 0",
+            "required_phrases": ["Mao"],
+            "penalty_cards": 0,
+            "description": "Must say 'Mao' after playing your last card to win the game",
+            "can_be_disputed": true
+        },
+        {
+            "name": "false_mao",
+            "trigger": "speech",
+            "condition": "hand_size > 0 and said 'Mao'",
+            "penalty_cards": 2,
+            "description": "Saying 'Mao' at any time other than after playing your last card is a penalty",
+            "can_be_disputed": false
+        },
+        {
+            "name": "no_cursing",
+            "trigger": "speech",
+            "condition": "message_contains_profanity",
+            "penalty_cards": 2,
+            "description": "Cursing at any time is a penalty",
+            "can_be_disputed": false
+        },
+        {
+            "name": "evil_card_announcement",
+            "trigger": "consecutive_play",
+            "condition": "consecutive_count >= 3 and card_rank == '6'",
+            "required_phrases": ["evil card"],
+            "penalty_cards": 2,
+            "description": "When 3 consecutive 6's are played, 'evil card' must be announced",
+            "can_be_disputed": true
+        }
+    ],
+    "timing_rules": [],
+    "play_rules": [
+        {
+            "name": "matching_suit_or_rank",
+            "description": "Card must match suit or rank of top card (Jacks are excluded from rank matching since they change suit)",
+            "jack_exception": true,
+            "auto_enforce": true,
+            "penalty_cards": 1
+        },
+        {
+            "name": "jack_on_jack_forbidden",
+            "description": "A Jack cannot be played on top of another Jack",
+            "auto_enforce": true,
+            "penalty_cards": 1
+        },
+        {
+            "name": "your_turn",
+            "description": "Can only play on your turn",
+            "auto_enforce": true,
+            "penalty_cards": 2
+        },
+        {
+            "name": "turn_action",
+            "description": "On your turn you may either draw 1 card or play 1 card",
+            "auto_enforce": true,
+            "penalty_cards": 0
+        }
+    ],
+    "penalties": {
+        "default_cards": 1,
+        "max_penalty_cards": 5,
+        "stacking_enabled": true,
+        "dispute_time_limit_seconds": 30
+    },
+    "point_of_order": {
+        "enabled": true,
+        "can_view_logs": true,
+        "log_history_count": 20,
+        "vote_time_limit_seconds": 60,
+        "abstention_allowed": true,
+        "required_majority": 0.5,
+        "restrictions": {
+            "no_touch_cards": true,
+            "no_say_point_of_order": true,
+            "allowed_exception": "end Point of Order",
+            "description": "During a Point of Order: players may not touch their cards, and players may not say 'Point of Order' except as part of 'end Point of Order'"
+        }
+    }
+}

@@ -13,6 +13,7 @@ from .game_session import GameSession
 from core.game import Game, GamePhase
 from core.player import Player
 from core.card import Card
+from config.settings import MAO_CHALLENGE_TIME, PENALTY_ACTION_DELAY, RECENT_CARDS_SHOWN, RECENT_CARDS_SHOWN_POO
 
 
 @dataclass
@@ -70,6 +71,9 @@ class GameServer:
             MessageType.VOTE: self._handle_vote,
             MessageType.VIEW_PLAYERS: self._handle_view_players,
             MessageType.DECLARE_MAO: self._handle_declare_mao,
+            MessageType.CANCEL_MAO: self._handle_cancel_mao,
+            MessageType.SHUFFLE_CARDS: self._handle_shuffle_cards,
+            MessageType.VIEW_HAND: self._handle_view_hand,
         }
 
     # --- Server Lifecycle ---
@@ -520,18 +524,24 @@ class GameServer:
                 # Apply penalty (draw cards) and track dealt cards
                 self.game.apply_penalty(penalty.id)
 
+                # Add delay between penalty actions
+                if PENALTY_ACTION_DELAY > 0:
+                    time.sleep(PENALTY_ACTION_DELAY)
 
-                # Handle -r flag: return last played card
+                # Handle -r flag: return last played card (only if played by penalized player)
                 return_card = message.data.get("return_card", False)
                 if return_card:
-                    result = self.game.return_card(player_id)
-                    if result:
-                        original_id, original_name, card = result
-                        self._send_hand_update(original_id)
-                        self._broadcast(Message(
-                            type=MessageType.NOTIFICATION,
-                            data={"message": f"Card {card} returned to {original_name}", "event_type": "return"}
-                        ))
+                    # Check if last played card was by the penalized player
+                    last_play = self.game.played_cards_stack[-1] if self.game.played_cards_stack else None
+                    if last_play and last_play[0] == target_id:
+                        result = self.game.return_card(player_id)
+                        if result:
+                            original_id, original_name, card = result
+                            self._send_hand_update(original_id)
+                            self._broadcast(Message(
+                                type=MessageType.NOTIFICATION,
+                                data={"message": f"Card {card} returned to {original_name}", "event_type": "return"}
+                            ))
 
                 # Cancel any active Mao declaration if penalty was given to the declaring player
                 if self.game.mao_declaring_player_id == target_id:
@@ -779,12 +789,14 @@ class GameServer:
 
                 self._broadcast_game_state()
 
+                from config.settings import MAO_CHALLENGE_TIME
+
                 # Start timer in a separate thread
-                self.mao_timer = threading.Timer(6.0, self._mao_timer_expired, args=[player_id])
+                self.mao_timer = threading.Timer(MAO_CHALLENGE_TIME, self._mao_timer_expired, args=[player_id])
                 self.mao_timer.daemon = True
                 self.mao_timer.start()
 
-                print(f"{player.name} declared Mao - 6 second timer started")
+                print(f"{player.name} declared Mao - {MAO_CHALLENGE_TIME} second timer started")
 
     def _mao_timer_expired(self, player_id: str) -> None:
         """Called when the 6-second Mao declaration timer expires."""
@@ -824,6 +836,94 @@ class GameServer:
 
             self._broadcast_game_state()
             print(f"Game over! {player.name} won by declaring Mao!")
+
+    def _handle_cancel_mao(self, message: Message, client_socket: socket.socket,
+                            player_id: str) -> None:
+        """Handle player canceling their own Mao declaration."""
+        with self.lock:
+            if self.game.mao_declaring_player_id != player_id:
+                self._send_error(client_socket, "You are not currently declaring Mao")
+                return
+
+            player = self.game.get_player(player_id)
+            player_name = player.name if player else player_id
+
+            self.game.cancel_mao_declaration()
+            if self.mao_timer:
+                self.mao_timer.cancel()
+                self.mao_timer = None
+
+            self._broadcast(Message(
+                type=MessageType.NOTIFICATION,
+                data={"message": f"{player_name} canceled their Mao declaration", "event_type": "mao_declare"}
+            ))
+            self._broadcast_game_state()
+
+    def _handle_shuffle_cards(self, message: Message, client_socket: socket.socket,
+                               player_id: str) -> None:
+        """Handle shuffle cards request during Point of Order."""
+        with self.lock:
+            if self.game.phase != GamePhase.POINT_OF_ORDER:
+                self._send_error(client_socket, "Can only shuffle cards during Point of Order")
+                return
+
+            target_id = message.data.get("target_id")
+            if not target_id:
+                # Shuffle own deck
+                target_id = player_id
+
+            target = self.game.get_player(target_id)
+            if not target:
+                self._send_error(client_socket, "Player not found")
+                return
+
+            # Shuffle the target's hand
+            import random
+            random.shuffle(target.hand)
+
+            client = self.clients.get(player_id)
+            shuffler_name = client.player_name if client else player_id
+
+            self._broadcast(Message(
+                type=MessageType.NOTIFICATION,
+                data={"message": f"{shuffler_name} shuffled {target.name}'s cards", "event_type": "poo_action"}
+            ))
+
+            # Send hand update to the target
+            self._send_hand_update(target_id)
+
+    def _handle_view_hand(self, message: Message, client_socket: socket.socket,
+                           player_id: str) -> None:
+        """Handle view hand request during Point of Order (notifies other players)."""
+        with self.lock:
+            if self.game.phase != GamePhase.POINT_OF_ORDER:
+                self._send_error(client_socket, "Can only view hands during Point of Order")
+                return
+
+            target_id = message.data.get("target_id")
+            if not target_id:
+                target_id = player_id
+
+            target = self.game.get_player(target_id)
+            if not target:
+                self._send_error(client_socket, "Player not found")
+                return
+
+            viewer = self.clients.get(player_id)
+            viewer_name = viewer.player_name if viewer else player_id
+
+            # Send the hand to the requester
+            self._send_message(client_socket, Message(
+                type=MessageType.HAND_UPDATE,
+                data={"hand": [card.to_dict() for card in target.hand]}
+            ))
+
+            # Notify all players (except viewer if viewing own hand)
+            if target_id != player_id:
+                self._broadcast(Message(
+                    type=MessageType.NOTIFICATION,
+                    data={"message": f"{viewer_name} viewed {target.name}'s hand", "event_type": "poo_action"}
+                ), exclude={player_id})
 
     # --- Utility Methods ---
 

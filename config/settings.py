@@ -6,19 +6,27 @@ DEFAULT_HOST = "0.0.0.0"
 DEFAULT_DECKS = 1
 DEFAULT_MAX_PLAYERS = 10
 DEFAULT_MIN_PLAYERS = 2
-DEFAULT_CARDS_PER_PLAYER = 7
+DEFAULT_CARDS_PER_PLAYER = 5  # As per rules
 
 # Network settings
 SOCKET_TIMEOUT = 10
 RECV_BUFFER_SIZE = 4096
 MESSAGE_HEADER_SIZE = 4
 
+# Mao declaration settings
+MAO_CHALLENGE_TIME = 10  # seconds for others to challenge Mao declaration
+
 # Point of Order settings
-POO_TIME_LIMIT = 60  # seconds
+POO_TIME_LIMIT = 60  # seconds (no longer used - POO has no time limit)
 POO_REQUIRED_MAJORITY = 0.5  # 50% + 1 to overturn
+
+# Penalty settings
+PENALTY_ACTION_DELAY = 1.0  # seconds between penalty actions
 
 # Logging settings
 MAX_LOG_ENTRIES = 100
+RECENT_CARDS_SHOWN = 3  # cards shown in normal play
+RECENT_CARDS_SHOWN_POO = 5  # cards shown during Point of Order
 
 # Card display
 SUIT_SYMBOLS = {

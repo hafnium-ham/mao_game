@@ -213,6 +213,9 @@ class Game:
         self.penalty_history: List[PendingPenalty] = []  # All penalties ever given (for POO lookup)
         self.played_cards_stack: List[Tuple[str, str, Card]] = []  # (player_id, player_name, card) for returns
 
+        # Recent cards for display (player_name, card)
+        self.recent_cards: List[Tuple[str, Card]] = []
+
         # Winners
         self.winners: List[str] = []
 
@@ -430,6 +433,12 @@ class Game:
         # Track for returns
         self.played_cards_stack.append((player_id, player.name, card))
 
+        # Track recent cards for display
+        self.recent_cards.append((player.name, card))
+        # Keep only the last 10 cards
+        if len(self.recent_cards) > 10:
+            self.recent_cards = self.recent_cards[-10:]
+
         # Track consecutive plays
         self._track_consecutive_play(player_id, card)
 
@@ -584,6 +593,11 @@ class Game:
     def get_recent_logs(self, count: int = 20) -> List[GameLog]:
         """Get the most recent log entries."""
         return self.logs[-count:]
+
+    def get_recent_cards(self, count: int = 3) -> List[Dict[str, Any]]:
+        """Get the most recent played cards with player names."""
+        recent = self.recent_cards[-count:] if self.recent_cards else []
+        return [{"player_name": name, "card": card.to_dict()} for name, card in recent]
 
     # --- Point of Order ---
 
@@ -1003,6 +1017,13 @@ class Game:
         # Include penalty history for POO display
         if self.phase == GamePhase.POINT_OF_ORDER:
             data["penalty_history"] = [p.to_dict() for p in self.penalty_history]
+
+        # Include recent cards (more during POO)
+        from config.settings import RECENT_CARDS_SHOWN, RECENT_CARDS_SHOWN_POO
+        if self.phase == GamePhase.POINT_OF_ORDER:
+            data["recent_cards"] = self.get_recent_cards(RECENT_CARDS_SHOWN_POO)
+        else:
+            data["recent_cards"] = self.get_recent_cards(RECENT_CARDS_SHOWN)
 
         return data
 

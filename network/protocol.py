@@ -33,12 +33,15 @@ class MessageType(Enum):
     VIEW_PLAYERS = "view_players" # Request player list
     RETURN_CARD = "return_card"   # Return last played card
     DECLARE_MAO = "declare_mao"   # Declare Mao (victory)
+    CANCEL_MAO = "cancel_mao"     # Cancel Mao declaration
 
     # Point of Order
     POINT_OF_ORDER = "point_of_order"        # Call Point of Order
     END_POINT_OF_ORDER = "end_point_of_order"  # End Point of Order
     VOTE_PENALTY = "vote_penalty"            # Select a penalty to vote on during POO
     VOTE = "vote"                            # Vote uphold/overturn/abstain during POO
+    SHUFFLE_CARDS = "shuffle_cards"          # Shuffle cards during POO
+    VIEW_HAND = "view_hand"                  # View hand (notifies others during POO)
 
     # Server responses
     SUCCESS = "success"           # Action successful

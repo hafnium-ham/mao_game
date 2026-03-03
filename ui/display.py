@@ -4,6 +4,7 @@ import os
 from typing import List, Dict, Any, Optional
 from .colors import Colors, colorize, bold, dim, red, green, yellow, cyan
 from core.card import Card, Suit
+from config.settings import RECENT_CARDS_SHOWN, RECENT_CARDS_SHOWN_POO
 
 
 class GameDisplay:
@@ -57,7 +58,8 @@ class GameDisplay:
   {Colors.GREEN}hit{Colors.RESET} <player>       - Hit another player
   {Colors.GREEN}penalty{Colors.RESET} <player> [-r] <reason> - Give penalty (-r: return card too)
   {Colors.GREEN}players{Colors.RESET}, pls       - View all players
-  {Colors.GREEN}mao{Colors.RESET}               - Declare Mao (6s for others to challenge)
+  {Colors.GREEN}mao{Colors.RESET}               - Declare Mao (10s for others to challenge)
+  {Colors.GREEN}cancel{Colors.RESET}            - Cancel your Mao declaration
 
   {Colors.BOLD}Point of Order:{Colors.RESET}
   {Colors.MAGENTA}poo{Colors.RESET} [reason]      - Call Point of Order (pauses game)
@@ -66,6 +68,8 @@ class GameDisplay:
   {Colors.MAGENTA}overturn{Colors.RESET}          - Vote to overturn the penalty
   {Colors.MAGENTA}abstain{Colors.RESET}           - Abstain from voting
   {Colors.MAGENTA}end point of order{Colors.RESET} / {Colors.MAGENTA}epoo{Colors.RESET} - End Point of Order
+  {Colors.MAGENTA}shuffle{Colors.RESET} [player]  - Shuffle a player's cards (or own)
+  {Colors.MAGENTA}view{Colors.RESET} [player]     - View a player's hand (others notified)
 
   {Colors.BOLD}Other:{Colors.RESET}
   {Colors.DIM}help, ?            - Show this help
@@ -153,6 +157,11 @@ class GameDisplay:
             except (KeyError, ValueError):
                 print(f"\n  Top Card: ?")
 
+        # Recent cards
+        recent_cards = state.get("recent_cards", [])
+        if recent_cards:
+            self._show_recent_cards(recent_cards)
+
         # Players
         print(f"\n  {Colors.BOLD}Players:{Colors.RESET}")
         print("  " + "─" * 45)
@@ -191,6 +200,22 @@ class GameDisplay:
         card_str = f"{card.rank.display}{symbol}"
         colored = colorize(card_str, color, Colors.BOLD)
         print(f"\n  {Colors.BOLD}Top Card:{Colors.RESET} {colored}")
+
+    def _show_recent_cards(self, recent_cards: List[Dict[str, Any]]) -> None:
+        """Display recent played cards with player names."""
+        print(f"\n  {Colors.BOLD}Recent Plays:{Colors.RESET}")
+        for entry in recent_cards:
+            player_name = entry.get("player_name", "?")
+            card_data = entry.get("card", {})
+            try:
+                card = Card.from_dict(card_data)
+                symbol = self.CARD_SYMBOLS.get(card.suit, "?")
+                color = self.SUIT_COLORS.get(card.suit, Colors.WHITE)
+                card_str = f"{card.rank.display}{symbol}"
+                colored = colorize(card_str, color, Colors.BOLD)
+                print(f"    {Colors.DIM}{player_name}:{Colors.RESET} {colored}")
+            except (KeyError, ValueError):
+                print(f"    {Colors.DIM}{player_name}:{Colors.RESET} ?")
 
     def _show_poo_summary(self, poo_data: Dict[str, Any]) -> None:
         """Show Point of Order summary in game state."""

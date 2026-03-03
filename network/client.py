@@ -176,6 +176,9 @@ class GameClient:
             "overturn": lambda a: self._cmd_cast_vote("overturn"),
             "abstain": lambda a: self._cmd_cast_vote("abstain"),
             "mao": self._cmd_mao,
+            "cancel": self._cmd_cancel_mao,
+            "shuffle": self._cmd_shuffle,
+            "view": self._cmd_view_hand,
             "join": self._cmd_join,
             "start": self._cmd_start,
             "help": self._cmd_help,
@@ -455,7 +458,7 @@ class GameClient:
         ))
 
     def _cmd_mao(self, args: str) -> None:
-        """Declare Mao. Can be declared with cards in hand - 6 second delay for challenges."""
+        """Declare Mao. Can be declared with cards in hand - 10 second delay for challenges."""
         if not self.in_game:
             print("Not in game!")
             return
@@ -463,6 +466,53 @@ class GameClient:
         self._send_message(Message(
             type=MessageType.DECLARE_MAO,
             data={}
+        ))
+
+    def _cmd_cancel_mao(self, args: str) -> None:
+        """Cancel your own Mao declaration."""
+        if not self.in_game:
+            print("Not in game!")
+            return
+
+        self._send_message(Message(type=MessageType.CANCEL_MAO))
+
+    def _cmd_shuffle(self, args: str) -> None:
+        """Shuffle cards during Point of Order."""
+        if not self.point_of_order_active:
+            print("Can only shuffle during Point of Order!")
+            return
+
+        # Optional: shuffle another player's cards
+        target_id = None
+        if args:
+            target_id = self._find_player_by_name(args.strip())
+            if not target_id:
+                print(f"Player '{args}' not found")
+                return
+
+        self._send_message(Message(
+            type=MessageType.SHUFFLE_CARDS,
+            data={"target_id": target_id} if target_id else {}
+        ))
+
+    def _cmd_view_hand(self, args: str) -> None:
+        """View a player's hand during Point of Order (others will be notified)."""
+        if not self.point_of_order_active:
+            print("Can only view hands during Point of Order!")
+            return
+
+        target_id = None
+        if args:
+            target_id = self._find_player_by_name(args.strip())
+            if not target_id:
+                print(f"Player '{args}' not found")
+                return
+        else:
+            target_id = self.player_id  # View own hand
+
+        self._send_message(Message(
+            type=MessageType.VIEW_HAND,
+            data={"target_id": target_id}
         ))
 
     def _cmd_help(self, args: str) -> None:

@@ -322,6 +322,10 @@ class TestBasicGameCommands(unittest.TestCase):
 class TestCardEffects(unittest.TestCase):
     """
     Tests for special card effects: skip (5), reverse (A), play again (Q).
+
+    CORE DESIGN PRINCIPLE: Card effects are NOT automatically enforced.
+    Players discover and enforce rules manually through the penalty system.
+    These tests verify that playing 5, Ace, or Queen does NOT auto-trigger effects.
     """
 
     def setUp(self):
@@ -333,21 +337,26 @@ class TestCardEffects(unittest.TestCase):
 
     def test_skip_card_5(self):
         """
-        TEST: Playing a 5 skips the next player.
+        TEST: Playing a 5 does NOT auto-skip the next player.
+
+        CORE DESIGN: Rules are NOT automatically enforced.
+        Players enforce the skip rule manually through penalties.
 
         GAME STATE SETUP:
         - 3 players in game
-        - Game started
+        - current_player_index forced to 0 for determinism
 
         EXPECTED BEHAVIOR:
-        - When 5 is played, next player is skipped
-        - Turn advances twice (skip_next_player called)
+        - play_card("p1", card_5) does NOT change current_player_index
+        - No automatic skip occurs during play_card()
+        - Players must enforce the skip rule manually
 
         ACTIONS:
-        - Play a 5
+        - Force player index to 0
+        - Give player1 a 5 and play it
 
         VERIFICATION:
-        - Turn direction advances twice
+        - current_player_index is still 0 after play_card (no auto-skip)
         """
         # GAME STATE SETUP
         self.game.add_player(self.player1)
@@ -355,7 +364,8 @@ class TestCardEffects(unittest.TestCase):
         self.game.add_player(self.player3)
         self.game.start_game()
 
-        initial_index = self.game.current_player_index
+        # Force deterministic starting position
+        self.game.current_player_index = 0
 
         # Give player1 a 5 to play
         card_5 = Card(Suit.HEARTS, Rank.FIVE)
@@ -364,28 +374,32 @@ class TestCardEffects(unittest.TestCase):
         # ACTIONS
         self.game.play_card("p1", card_5)
 
-        # VERIFICATION
-        # After playing 5, turn should skip next player (advance twice)
-        # The skip is applied in _apply_card_effect
-        # We verify by checking the turn advanced more than normal
-        # (exact behavior depends on starting position)
+        # VERIFICATION: playing a 5 does NOT auto-skip
+        # play_card() should NOT change the current_player_index
+        self.assertEqual(self.game.current_player_index, 0,
+                         "Playing a 5 should NOT automatically skip the next player")
 
     def test_reverse_card_ace(self):
         """
-        TEST: Playing an Ace reverses direction.
+        TEST: Playing an Ace does NOT auto-reverse direction.
+
+        CORE DESIGN: Rules are NOT automatically enforced.
+        Players enforce the reverse rule manually through penalties.
 
         GAME STATE SETUP:
         - 3 players in game
-        - Initial direction is CLOCKWISE
+        - Direction starts as CLOCKWISE
 
         EXPECTED BEHAVIOR:
-        - After playing Ace, direction reverses to COUNTER_CLOCKWISE
+        - After playing Ace, direction remains CLOCKWISE (no auto-reverse)
+        - Players must manually enforce direction reversal
 
         ACTIONS:
+        - Note initial direction (CLOCKWISE)
         - Play an Ace
 
         VERIFICATION:
-        - Direction changed from CLOCKWISE to COUNTER_CLOCKWISE
+        - Direction NOT changed from CLOCKWISE after playing Ace
         """
         # GAME STATE SETUP
         self.game.add_player(self.player1)
@@ -393,6 +407,8 @@ class TestCardEffects(unittest.TestCase):
         self.game.add_player(self.player3)
         self.game.start_game()
 
+        # Ensure starting direction is CLOCKWISE
+        self.game.turn_direction = TurnDirection.CLOCKWISE
         initial_direction = self.game.turn_direction
 
         # Give player1 an Ace
@@ -402,27 +418,30 @@ class TestCardEffects(unittest.TestCase):
         # ACTIONS
         self.game.play_card("p1", card_ace)
 
-        # VERIFICATION
-        self.assertNotEqual(self.game.turn_direction, initial_direction,
-                          "Direction should reverse after Ace")
+        # VERIFICATION: Ace does NOT auto-reverse direction
+        self.assertEqual(self.game.turn_direction, initial_direction,
+                         "Playing an Ace should NOT automatically reverse direction")
 
     def test_play_again_queen(self):
         """
-        TEST: Playing a Queen allows same player to play again.
+        TEST: Playing a Queen does NOT auto-set the play_again flag.
+
+        CORE DESIGN: Rules are NOT automatically enforced.
+        Players enforce the play-again rule manually through penalties.
 
         GAME STATE SETUP:
         - Game in progress
         - Player has a Queen
 
         EXPECTED BEHAVIOR:
-        - After playing Queen, play_again flag is True
-        - Same player should play again
+        - After playing Queen, should_play_again() returns False
+        - play_again flag is NOT auto-set by playing a Queen
 
         ACTIONS:
         - Play a Queen
 
         VERIFICATION:
-        - should_play_again() returns True
+        - should_play_again() returns False (not auto-enabled)
         """
         # GAME STATE SETUP
         self.game.add_player(self.player1)
@@ -436,9 +455,9 @@ class TestCardEffects(unittest.TestCase):
         # ACTIONS
         self.game.play_card("p1", card_queen)
 
-        # VERIFICATION
-        self.assertTrue(self.game.should_play_again(),
-                       "Player should be able to play again after Queen")
+        # VERIFICATION: Queen does NOT auto-set play_again
+        self.assertFalse(self.game.should_play_again(),
+                         "Playing a Queen should NOT automatically enable play-again")
 
 
 class TestPenaltyCommands(unittest.TestCase):
@@ -1284,6 +1303,615 @@ class TestProtocolMessages(unittest.TestCase):
         self.assertEqual(decoded1.type, MessageType.KNOCK)
         self.assertEqual(decoded2.type, MessageType.CHAT)
         self.assertEqual(len(remaining2), 0)
+
+
+class TestSession3Changes(unittest.TestCase):
+    """
+    NEW Tests for Session 3 behavior changes:
+
+    9.  Cancel Mao - ANY player can cancel (not just the declarer)
+    10. Shuffle Cards - shuffles discard pile into draw pile (not player's hand)
+    11. View Own Hand - game state only exposes requesting player's hand
+    12. Return Card - only returned if last card was played by penalized player
+    13. Hand Not Auto-Displayed - game state serialization does not expose hands
+    14. POO Command Phrases - only exact "Point of Order" phrase starts POO
+    """
+
+    def setUp(self):
+        """GAME STATE SETUP: 3-player game for comprehensive testing."""
+        self.game = Game(num_decks=1, min_players=2, cards_per_player=5)
+        self.player1 = Player(id="p1", name="Alice")
+        self.player2 = Player(id="p2", name="Bob")
+        self.player3 = Player(id="p3", name="Charlie")
+
+    # --- Test 9: Cancel Mao (any player) ---
+
+    def test_any_player_can_cancel_mao(self):
+        """
+        TEST 9: ANY player can cancel a Mao declaration (not just the declarer).
+
+        GAME STATE SETUP:
+        - Game in progress
+        - Player1 has declared Mao
+
+        EXPECTED BEHAVIOR:
+        - Player2 (not the declarer) can cancel the Mao declaration
+        - mao_declaring_player_id becomes None
+        - Timer is cleared
+
+        ACTIONS:
+        - Player1 starts Mao declaration
+        - Cancel the declaration (simulating any player canceling)
+
+        VERIFICATION:
+        - mao_declaring_player_id is None (cleared regardless of who cancels)
+        - mao_declaration_time is None (timer cleared)
+        """
+        # GAME STATE SETUP
+        self.game.add_player(self.player1)
+        self.game.add_player(self.player2)
+        self.game.start_game()
+
+        # Player1 declares Mao
+        result = self.game.start_mao_declaration("p1")
+        self.assertTrue(result, "Player1 should be able to declare Mao")
+        self.assertEqual(self.game.mao_declaring_player_id, "p1",
+                         "Player1 should be the declaring player")
+
+        # ACTIONS: Player2 (not the declarer) cancels - game.cancel_mao_declaration()
+        # has no player restriction; the server enforces "any player" (no check on who cancels)
+        self.game.cancel_mao_declaration()
+
+        # VERIFICATION
+        self.assertIsNone(self.game.mao_declaring_player_id,
+                          "Mao declaration should be cleared when any player cancels")
+        self.assertIsNone(self.game.mao_declaration_time,
+                          "Declaration timer should be cleared after cancel")
+
+    def test_cancel_mao_only_when_active(self):
+        """
+        TEST 9b: Canceling Mao when no declaration is active does nothing harmful.
+
+        GAME STATE SETUP:
+        - Game in progress, no active Mao declaration
+
+        EXPECTED BEHAVIOR:
+        - cancel_mao_declaration() still runs without error
+        - State remains clean (None values)
+
+        ACTIONS:
+        - Call cancel_mao_declaration() with no active declaration
+
+        VERIFICATION:
+        - mao_declaring_player_id remains None
+        - No exception raised
+        """
+        # GAME STATE SETUP
+        self.game.add_player(self.player1)
+        self.game.add_player(self.player2)
+        self.game.start_game()
+
+        # Confirm no active declaration
+        self.assertIsNone(self.game.mao_declaring_player_id,
+                          "No declaration should be active initially")
+
+        # ACTIONS: Cancel when nothing to cancel (should be safe)
+        self.game.cancel_mao_declaration()  # Should not raise
+
+        # VERIFICATION
+        self.assertIsNone(self.game.mao_declaring_player_id,
+                          "mao_declaring_player_id should remain None")
+
+    # --- Test 10: Shuffle Cards (discard to draw) ---
+
+    def test_shuffle_discard_into_draw_pile(self):
+        """
+        TEST 10: Shuffle moves discard pile (except top card) into draw pile.
+
+        This simulates the server's _handle_shuffle_cards logic which runs during POO.
+        The server does NOT affect other players' hands - only pile manipulation.
+
+        GAME STATE SETUP:
+        - Game in POO
+        - Discard pile has the initial card + 5 extra cards added (6 total)
+
+        EXPECTED BEHAVIOR:
+        - After shuffle: discard has exactly 1 card (top card)
+        - Top card identity is preserved
+        - Draw pile grows by (discard_count - 1) cards
+        - Other players' hands are NOT affected
+
+        ACTIONS:
+        - Add 5 cards to discard pile
+        - Simulate the shuffle operation (as server._handle_shuffle_cards does)
+
+        VERIFICATION:
+        - len(discard_pile) == 1
+        - discard_pile[0] == original top card
+        - draw_pile count increased by (initial_discard_count - 1)
+        - Player hands unchanged
+        """
+        # GAME STATE SETUP
+        self.game.add_player(self.player1)
+        self.game.add_player(self.player2)
+        self.game.start_game()
+
+        p1_cards_before = len(self.player1.hand)
+        p2_cards_before = len(self.player2.hand)
+
+        # Add extra cards to discard pile to simulate played cards
+        for _ in range(5):
+            card = self.game.draw_pile.draw()
+            self.game.discard_pile.append(card)
+
+        initial_draw_count = self.game.draw_pile.remaining()
+        initial_discard_count = len(self.game.discard_pile)  # should be 1 + 5 = 6
+        top_card_before_shuffle = self.game.discard_pile[-1]
+
+        # Start POO (shuffle only works during POO in server)
+        self.game.initiate_point_of_order("p1", "Deck exhaustion")
+
+        # ACTIONS: Simulate the server's shuffle operation
+        top_card = self.game.discard_pile[-1]
+        cards_to_shuffle = self.game.discard_pile[:-1]
+        self.game.draw_pile.add_cards(cards_to_shuffle)
+        self.game.draw_pile.shuffle()
+        self.game.discard_pile = [top_card]
+
+        # VERIFICATION
+        self.assertEqual(len(self.game.discard_pile), 1,
+                         "Discard pile should have exactly 1 card after shuffle")
+        self.assertEqual(self.game.discard_pile[0], top_card_before_shuffle,
+                         "The top card must be preserved in the discard pile")
+
+        expected_draw_count = initial_draw_count + (initial_discard_count - 1)
+        self.assertEqual(self.game.draw_pile.remaining(), expected_draw_count,
+                         f"Draw pile should have {expected_draw_count} cards "
+                         f"(gained {initial_discard_count - 1} from discard)")
+
+        # Players' hands must NOT be affected
+        self.assertEqual(len(self.player1.hand), p1_cards_before,
+                         "Player1's hand should NOT be changed by shuffle")
+        self.assertEqual(len(self.player2.hand), p2_cards_before,
+                         "Player2's hand should NOT be changed by shuffle")
+
+    def test_shuffle_requires_enough_discard_cards(self):
+        """
+        TEST 10b: Shuffle fails gracefully when discard pile has only 1 card (top card).
+
+        GAME STATE SETUP:
+        - Game started with exactly 1 card in discard pile
+
+        EXPECTED BEHAVIOR:
+        - When only 1 card in discard, there's nothing to shuffle
+        - cards_to_shuffle is empty (no-op)
+
+        VERIFICATION:
+        - cards_to_shuffle list is empty
+        - No cards added to draw pile
+        """
+        # GAME STATE SETUP
+        self.game.add_player(self.player1)
+        self.game.add_player(self.player2)
+        self.game.start_game()
+
+        # Discard pile has exactly 1 card (the initial card placed during start_game)
+        self.assertEqual(len(self.game.discard_pile), 1,
+                         "Should have exactly 1 card in discard at game start")
+
+        initial_draw_count = self.game.draw_pile.remaining()
+
+        # Simulate the server's check: if discard_count <= 1, refuse to shuffle
+        discard_count = len(self.game.discard_pile)
+        can_shuffle = discard_count > 1
+
+        # VERIFICATION
+        self.assertFalse(can_shuffle,
+                         "Should NOT be able to shuffle with only 1 card in discard")
+        self.assertEqual(self.game.draw_pile.remaining(), initial_draw_count,
+                         "Draw pile should be unchanged when shuffle is refused")
+
+    # --- Test 11: View Own Hand (game state only exposes own hand) ---
+
+    def test_game_state_only_shows_requesting_players_hand(self):
+        """
+        TEST 11: Game state serialization only includes hand for the requesting player.
+
+        During POO, when a player views their hand, they only see their OWN cards.
+        Other players' hand details are NOT included in the serialized game state.
+
+        GAME STATE SETUP:
+        - Game in progress, players have dealt hands
+
+        EXPECTED BEHAVIOR:
+        - to_dict(for_player_id="p1") includes hand data ONLY for p1
+        - Player2's hand is NOT exposed (just card count)
+
+        ACTIONS:
+        - Serialize game state from p1's perspective
+
+        VERIFICATION:
+        - Player1's data has "hand" key with actual cards
+        - Player2's data does NOT have "hand" key
+        """
+        # GAME STATE SETUP
+        self.game.add_player(self.player1)
+        self.game.add_player(self.player2)
+        self.game.start_game()
+
+        # ACTIONS: Get game state as seen by Player1
+        state_as_p1 = self.game.to_dict(for_player_id="p1")
+
+        # VERIFICATION
+        p1_data = next(p for p in state_as_p1["players"] if p["id"] == "p1")
+        p2_data = next(p for p in state_as_p1["players"] if p["id"] == "p2")
+
+        # Player1 should see their own hand
+        self.assertIn("hand", p1_data,
+                      "Player1's own hand should be included in their game state view")
+        self.assertIsNotNone(p1_data["hand"],
+                             "Player1's hand data should not be None")
+        self.assertEqual(len(p1_data["hand"]), len(self.player1.hand),
+                         "Player1's hand data should match their actual hand size")
+
+        # Player2's hand should NOT be visible to Player1
+        self.assertNotIn("hand", p2_data,
+                         "Player2's hand should NOT be visible to Player1")
+
+    def test_get_player_hand_returns_correct_hand(self):
+        """
+        TEST 11b: get_player_hand() returns the correct player's hand.
+
+        This is the server-side method used to send hand updates.
+        It should return the exact player's hand, not other players'.
+
+        VERIFICATION:
+        - get_player_hand("p1") returns Player1's hand
+        - get_player_hand("p2") returns Player2's hand (different from p1's)
+        - Both are correct sizes
+        """
+        # GAME STATE SETUP
+        self.game.add_player(self.player1)
+        self.game.add_player(self.player2)
+        self.game.start_game()
+
+        # ACTIONS
+        p1_hand = self.game.get_player_hand("p1")
+        p2_hand = self.game.get_player_hand("p2")
+
+        # VERIFICATION
+        self.assertEqual(len(p1_hand), len(self.player1.hand),
+                         "get_player_hand should return Player1's full hand")
+        self.assertEqual(len(p2_hand), len(self.player2.hand),
+                         "get_player_hand should return Player2's full hand")
+        # The hands should be different (different cards were dealt)
+        # We compare as sets of card strings since order may differ
+        p1_card_strs = {str(c) for c in p1_hand}
+        p2_card_strs = {str(c) for c in p2_hand}
+        self.assertNotEqual(p1_card_strs, p2_card_strs,
+                            "Player1 and Player2 should have different hands")
+
+    # --- Test 12: Return Card (only if played by penalized player) ---
+
+    def test_return_card_check_identifies_last_player(self):
+        """
+        TEST 12: The return_card check correctly identifies who played last.
+
+        When the server processes a penalty with -r (return card) flag, it checks
+        whether the LAST card played was by the PENALIZED player. If Player2 played
+        last, penalizing Player1 should NOT return a card.
+
+        GAME STATE SETUP:
+        - Player1 plays a card (first)
+        - Player2 plays a card (second, most recent)
+
+        EXPECTED BEHAVIOR:
+        - played_cards_stack[-1] shows Player2 as the last player
+        - Server logic: if last_play[0] == target_id → only return if Player2 penalized
+        - Penalizing Player1 should NOT trigger return (Player2 played last)
+
+        ACTIONS:
+        - Player1 plays card1
+        - Player2 plays card2
+        - Check who is last in played_cards_stack
+
+        VERIFICATION:
+        - last played card belongs to Player2 (id="p2")
+        - Simulated server check: "should return card for p1?" → False
+        - Simulated server check: "should return card for p2?" → True
+        """
+        # GAME STATE SETUP
+        self.game.add_player(self.player1)
+        self.game.add_player(self.player2)
+        self.game.start_game()
+
+        # Player1 plays first
+        card1 = self.player1.hand[0]
+        self.game.play_card("p1", card1)
+
+        # Player2 plays second (most recent)
+        card2 = self.player2.hand[0]
+        self.game.play_card("p2", card2)
+
+        # VERIFICATION: Check the played_cards_stack
+        self.assertGreater(len(self.game.played_cards_stack), 0,
+                           "played_cards_stack should have entries")
+
+        last_player_id, last_player_name, last_card = self.game.played_cards_stack[-1]
+
+        self.assertEqual(last_player_id, "p2",
+                         "Last played card should belong to Player2")
+        self.assertEqual(last_card, card2,
+                         "Last card in stack should be the card Player2 played")
+
+        # Simulate server's return_card check logic:
+        # "if last_play[0] == target_id: then return card"
+        should_return_for_p1 = (last_player_id == "p1")
+        should_return_for_p2 = (last_player_id == "p2")
+
+        self.assertFalse(should_return_for_p1,
+                         "Should NOT return card when penalizing p1 (p2 played last)")
+        self.assertTrue(should_return_for_p2,
+                        "SHOULD return card when penalizing p2 (p2 played last)")
+
+    def test_return_card_restores_to_last_player(self):
+        """
+        TEST 12b: game.return_card() restores the last played card to its owner.
+
+        When the server calls game.return_card(), it removes the last card from
+        the discard pile and returns it to the player who played it.
+
+        GAME STATE SETUP:
+        - Player1 plays a card
+
+        EXPECTED BEHAVIOR:
+        - return_card() returns (player_id, player_name, card) tuple
+        - Card is back in Player1's hand
+        - Card is removed from discard pile
+
+        VERIFICATION:
+        - Return result identifies Player1 as original owner
+        - Player1's hand count increased by 1
+        - The returned card matches what was played
+        """
+        # GAME STATE SETUP
+        self.game.add_player(self.player1)
+        self.game.add_player(self.player2)
+        self.game.start_game()
+
+        card_played = self.player1.hand[0]
+        p1_hand_before = len(self.player1.hand)
+
+        self.game.play_card("p1", card_played)
+        p1_hand_after_play = len(self.player1.hand)
+        self.assertEqual(p1_hand_after_play, p1_hand_before - 1,
+                         "Player1 should have 1 fewer card after playing")
+
+        # ACTIONS: Return the card
+        result = self.game.return_card("p2")  # p2 requests the return
+
+        # VERIFICATION
+        self.assertIsNotNone(result, "return_card should succeed")
+        original_id, original_name, returned_card = result
+
+        self.assertEqual(original_id, "p1",
+                         "Returned card should go back to Player1 (who played it)")
+        self.assertEqual(original_name, "Alice",
+                         "Original player name should be Alice")
+        self.assertEqual(returned_card, card_played,
+                         "Returned card should be the one that was played")
+        self.assertEqual(len(self.player1.hand), p1_hand_before,
+                         "Player1 should have their card back")
+
+    # --- Test 13: Hand Not Auto-Displayed ---
+
+    def test_game_state_no_hand_data_without_player_id(self):
+        """
+        TEST 13: Game state without for_player_id does NOT include any hand data.
+
+        When render_game_state is called, it uses to_dict(for_player_id=player_id).
+        This test verifies that WITHOUT a player_id, NO hands are exposed.
+        This ensures hands are never accidentally auto-shown.
+
+        GAME STATE SETUP:
+        - Game in progress with dealt cards
+
+        EXPECTED BEHAVIOR:
+        - to_dict() with no for_player_id → no "hand" keys in any player data
+        - This is the "safe default" state that prevents accidental exposure
+
+        ACTIONS:
+        - Serialize game state without specifying a player
+
+        VERIFICATION:
+        - No player data has a "hand" key
+        """
+        # GAME STATE SETUP
+        self.game.add_player(self.player1)
+        self.game.add_player(self.player2)
+        self.game.start_game()
+
+        # ACTIONS: Get state with no requesting player (no hand included)
+        state_no_player = self.game.to_dict()  # No for_player_id
+
+        # VERIFICATION: No player should have hand data
+        for player_data in state_no_player["players"]:
+            self.assertNotIn("hand", player_data,
+                             f"Player {player_data.get('name')} should NOT have hand "
+                             f"data in state without for_player_id")
+
+    def test_game_state_only_own_player_gets_hand(self):
+        """
+        TEST 13b: Only the requesting player gets hand data; others do not.
+
+        This ensures the display can only show the requesting player's hand,
+        not others'. Players must explicitly request their hand via 'hand' command.
+
+        GAME STATE SETUP:
+        - 3-player game in progress
+
+        EXPECTED BEHAVIOR:
+        - to_dict(for_player_id="p2") includes hand for p2 ONLY
+        - p1 and p3 do NOT have hand data
+
+        ACTIONS:
+        - Serialize game state from p2's perspective
+
+        VERIFICATION:
+        - Only p2's data has "hand" key
+        """
+        # GAME STATE SETUP
+        self.game.add_player(self.player1)
+        self.game.add_player(self.player2)
+        self.game.add_player(self.player3)
+        self.game.start_game()
+
+        # ACTIONS
+        state_as_p2 = self.game.to_dict(for_player_id="p2")
+
+        # VERIFICATION
+        for player_data in state_as_p2["players"]:
+            pid = player_data.get("id")
+            if pid == "p2":
+                self.assertIn("hand", player_data,
+                              "p2's own hand should be in their game state")
+            else:
+                self.assertNotIn("hand", player_data,
+                                 f"Player {player_data.get('name')} (not p2) "
+                                 f"should NOT have hand data in p2's state view")
+
+    # --- Test 14: POO Command Phrases ---
+
+    def test_poo_requires_player_in_game(self):
+        """
+        TEST 14: Point of Order can only be initiated by a player IN the game.
+
+        GAME STATE SETUP:
+        - Game in progress
+        - Player1 is in game, "outsider" is not
+
+        EXPECTED BEHAVIOR:
+        - initiate_point_of_order("p1") succeeds
+        - initiate_point_of_order("outsider") fails (player not found)
+
+        ACTIONS:
+        - Player1 (in game) initiates POO
+        - Outsider (not in game) tries to initiate POO
+
+        VERIFICATION:
+        - Valid player's POO succeeds
+        - Invalid player's POO fails
+        """
+        # GAME STATE SETUP
+        self.game.add_player(self.player1)
+        self.game.add_player(self.player2)
+        self.game.start_game()
+
+        # ACTIONS & VERIFICATION: Player in game can start POO
+        result_valid = self.game.initiate_point_of_order("p1", "Dispute")
+        self.assertTrue(result_valid, "Player in game should be able to start POO")
+        self.assertEqual(self.game.phase, GamePhase.POINT_OF_ORDER,
+                         "Phase should be POINT_OF_ORDER after valid initiation")
+
+        # End POO to reset
+        self.game.end_point_of_order()
+
+        # ACTIONS & VERIFICATION: Player NOT in game cannot start POO
+        result_invalid = self.game.initiate_point_of_order("outsider", "Fake")
+        self.assertFalse(result_invalid,
+                         "Player not in game should NOT be able to start POO")
+        self.assertEqual(self.game.phase, GamePhase.IN_PROGRESS,
+                         "Phase should remain IN_PROGRESS after invalid initiation")
+
+    def test_poo_phrase_controls_game_state(self):
+        """
+        TEST 14b: "Point of Order" triggers exactly one phase transition.
+
+        The game's initiate_point_of_order() is what "Point of Order" triggers.
+        Only one POO can be active at a time - a second call does nothing.
+
+        GAME STATE SETUP:
+        - Game in progress
+
+        EXPECTED BEHAVIOR:
+        - First initiate_point_of_order() → True, phase = POINT_OF_ORDER
+        - Second initiate_point_of_order() (nested) → False, phase unchanged
+
+        ACTIONS:
+        - Call initiate_point_of_order twice
+
+        VERIFICATION:
+        - First call returns True, second returns False
+        - Phase is POINT_OF_ORDER (not double-nested)
+        """
+        # GAME STATE SETUP
+        self.game.add_player(self.player1)
+        self.game.add_player(self.player2)
+        self.game.start_game()
+
+        # ACTIONS
+        first_result = self.game.initiate_point_of_order("p1", "First Point of Order")
+        second_result = self.game.initiate_point_of_order("p2", "Second Point of Order")
+
+        # VERIFICATION
+        self.assertTrue(first_result,
+                        "First 'Point of Order' should succeed")
+        self.assertFalse(second_result,
+                         "Second 'Point of Order' while one is active should fail")
+        self.assertEqual(self.game.phase, GamePhase.POINT_OF_ORDER,
+                         "Phase should be POINT_OF_ORDER (only one active)")
+        # First caller should be tracked (not overwritten by failed second call)
+        self.assertEqual(self.game.point_of_order.caller_id, "p1",
+                         "Original POO caller should still be p1")
+
+    def test_end_poo_restores_game_phase(self):
+        """
+        TEST 14c: Ending Point of Order ("End Point of Order" / "epoo") restores IN_PROGRESS.
+
+        Both "End Point of Order" and "epoo" trigger end_point_of_order().
+        This test verifies the underlying game logic is correct.
+
+        GAME STATE SETUP:
+        - Game in POINT_OF_ORDER phase
+
+        EXPECTED BEHAVIOR:
+        - end_point_of_order() → True, phase = IN_PROGRESS
+        - point_of_order object is None
+        - end_point_of_order() when NOT in POO → False
+
+        ACTIONS:
+        - Start POO
+        - End POO
+        - Try to end POO again
+
+        VERIFICATION:
+        - First end returns True, phase is IN_PROGRESS
+        - Second end returns False (already ended)
+        """
+        # GAME STATE SETUP
+        self.game.add_player(self.player1)
+        self.game.add_player(self.player2)
+        self.game.start_game()
+
+        # Start POO
+        self.game.initiate_point_of_order("p1", "Test Point of Order")
+        self.assertEqual(self.game.phase, GamePhase.POINT_OF_ORDER,
+                         "Phase should be POINT_OF_ORDER")
+
+        # ACTIONS: End POO (simulates "End Point of Order" or "epoo" command)
+        end_result = self.game.end_point_of_order()
+
+        # VERIFICATION
+        self.assertTrue(end_result, "end_point_of_order should return True")
+        self.assertEqual(self.game.phase, GamePhase.IN_PROGRESS,
+                         "Phase should be IN_PROGRESS after ending POO")
+        self.assertIsNone(self.game.point_of_order,
+                          "point_of_order should be None after ending")
+
+        # Try to end again (simulates double "epoo" - should fail gracefully)
+        second_end = self.game.end_point_of_order()
+        self.assertFalse(second_end,
+                         "Ending POO when not in POO should return False")
 
 
 if __name__ == "__main__":

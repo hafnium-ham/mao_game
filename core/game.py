@@ -1,11 +1,14 @@
 """Game class for Mao card game - central game state management."""
 
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Set
 from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime
 import time
 import random
+
+# Time window (seconds) after POO starts during which players can pick up cards without announcement
+POO_HAND_TOGGLE_WINDOW = 5.0
 
 from .card import Card
 from .deck import Deck
@@ -367,7 +370,14 @@ class Game:
             self.turn_direction = TurnDirection.CLOCKWISE
 
     def skip_next_player(self) -> None:
-        """Skip the next player in turn order."""
+        """
+        Skip the next player in turn order (advances turn twice).
+
+        NOTE: This is NOT called automatically when a 5 is played.
+        Players enforce skip rules manually through the penalty system.
+        When called manually, advances turn by 2 to skip one player.
+        """
+        self.advance_turn()
         self.advance_turn()
 
     def is_player_turn(self, player_id: str) -> bool:
@@ -465,7 +475,16 @@ class Game:
             self.consecutive_plays = [(player_id, card.rank.display)]
 
     def _apply_card_effect(self, card: Card) -> None:
-        """Apply special card effects."""
+        """
+        Apply special card effects. Currently dormant - rules enforced by players.
+
+        DESIGN NOTE: Card effects (skip, reverse, play-again) are NOT auto-enforced.
+        Players discover and enforce rules manually through the penalty system.
+        Methods available for manual enforcement when rules are applied:
+        - skip_next_player() for 5 (advances turn twice, skipping one player)
+        - reverse_direction() for Ace
+        - self.play_again = True for Queen
+        """
         rank = card.rank.display
 
         # Reset play_again flag
@@ -475,20 +494,9 @@ class Game:
         if rank != "J":
             self.jack_suit = None
 
-        # 5: skip next player
-        if rank == "5":
-            self.skip_next_player()
-            self._log_event("effect", None, None, f"5 played - next player skipped")
-
-        # A: reverse direction
-        elif rank == "A":
-            self.reverse_direction()
-            self._log_event("effect", None, None, f"Ace played - direction reversed")
-
-        # Q: play again
-        elif rank == "Q":
-            self.play_again = True
-            self._log_event("effect", None, None, f"Queen played - player goes again")
+        # NOTE: No automatic card effects applied here.
+        # Skip (5), Reverse (Ace), Play-again (Queen) are not auto-triggered.
+        # Players enforce rules manually through the penalty system.
 
     def set_jack_suit(self, suit) -> None:
         """Set the current suit after a Jack is played."""

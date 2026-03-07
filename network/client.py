@@ -132,8 +132,20 @@ class GameClient:
     def _execute_command(self, user_input: str) -> None:
         """Parse and execute a user command."""
         # Handle multi-word commands first
-        lower = user_input.lower()
-        if lower == "end point of order" or lower == "epoo":
+        lower = user_input.lower().strip()
+
+        # "Point of Order" - exact phrase to call POO
+        if lower == "point of order":
+            self._cmd_poo("")
+            return
+
+        # "End Point of Order" - exact phrase to end POO
+        if lower == "end point of order":
+            self._cmd_end_poo("")
+            return
+
+        # Also support "epoo" as shorthand
+        if lower == "epoo":
             self._cmd_end_poo("")
             return
 
@@ -154,6 +166,7 @@ class GameClient:
             "hand": self._cmd_hand,
             "h": self._cmd_hand,
             "cards": self._cmd_hand,
+            "view": self._cmd_hand,  # Alias for hand
             "play": self._cmd_play,
             "p": self._cmd_play,
             "draw": self._cmd_draw,
@@ -169,8 +182,6 @@ class GameClient:
             "pe": self._cmd_penalty,
             "players": self._cmd_players,
             "pls": self._cmd_players,
-            "poo": self._cmd_poo,
-            "epoo": self._cmd_end_poo,
             "vote": self._cmd_vote,
             "uphold": lambda a: self._cmd_cast_vote("uphold"),
             "overturn": lambda a: self._cmd_cast_vote("overturn"),
@@ -178,7 +189,6 @@ class GameClient:
             "mao": self._cmd_mao,
             "cancel": self._cmd_cancel_mao,
             "shuffle": self._cmd_shuffle,
-            "view": self._cmd_view_hand,
             "join": self._cmd_join,
             "start": self._cmd_start,
             "help": self._cmd_help,
@@ -477,42 +487,33 @@ class GameClient:
         self._send_message(Message(type=MessageType.CANCEL_MAO))
 
     def _cmd_shuffle(self, args: str) -> None:
-        """Shuffle cards during Point of Order."""
+        """
+        Shuffle discard pile into draw pile during Point of Order.
+        Used to fix draw pile exhaustion - does NOT affect other players.
+        """
         if not self.point_of_order_active:
             print("Can only shuffle during Point of Order!")
             return
 
-        # Optional: shuffle another player's cards
-        target_id = None
-        if args:
-            target_id = self._find_player_by_name(args.strip())
-            if not target_id:
-                print(f"Player '{args}' not found")
-                return
-
         self._send_message(Message(
             type=MessageType.SHUFFLE_CARDS,
-            data={"target_id": target_id} if target_id else {}
+            data={}
         ))
 
     def _cmd_view_hand(self, args: str) -> None:
-        """View a player's hand during Point of Order (others will be notified)."""
+        """View your own hand during Point of Order. All players will be notified."""
         if not self.point_of_order_active:
-            print("Can only view hands during Point of Order!")
+            # Outside POO, just show hand directly (it's already synced)
+            if not self.hand:
+                print("You have no cards.")
+            else:
+                self.display.show_hand(self.hand)
             return
 
-        target_id = None
-        if args:
-            target_id = self._find_player_by_name(args.strip())
-            if not target_id:
-                print(f"Player '{args}' not found")
-                return
-        else:
-            target_id = self.player_id  # View own hand
-
+        # During POO, request hand view from server (which announces to all)
         self._send_message(Message(
             type=MessageType.VIEW_HAND,
-            data={"target_id": target_id}
+            data={}
         ))
 
     def _cmd_help(self, args: str) -> None:

@@ -839,14 +839,16 @@ class GameServer:
 
     def _handle_cancel_mao(self, message: Message, client_socket: socket.socket,
                             player_id: str) -> None:
-        """Handle player canceling their own Mao declaration."""
+        """Handle any player canceling a Mao declaration."""
         with self.lock:
-            if self.game.mao_declaring_player_id != player_id:
-                self._send_error(client_socket, "You are not currently declaring Mao")
+            if self.game.mao_declaring_player_id is None:
+                self._send_error(client_socket, "No Mao declaration in progress")
                 return
 
             player = self.game.get_player(player_id)
+            declaring_player = self.game.get_player(self.game.mao_declaring_player_id)
             player_name = player.name if player else player_id
+            declarer_name = declaring_player.name if declaring_player else "Someone"
 
             self.game.cancel_mao_declaration()
             if self.mao_timer:
@@ -855,75 +857,84 @@ class GameServer:
 
             self._broadcast(Message(
                 type=MessageType.NOTIFICATION,
-                data={"message": f"{player_name} canceled their Mao declaration", "event_type": "mao_declare"}
+                data={"message": f"{player_name} canceled {declarer_name}'s Mao declaration", "event_type": "mao_declare"}
             ))
             self._broadcast_game_state()
 
     def _handle_shuffle_cards(self, message: Message, client_socket: socket.socket,
                                player_id: str) -> None:
-        """Handle shuffle cards request during Point of Order."""
+        """
+        Handle shuffle cards request during Point of Order.
+        Shuffles discard pile (except top card) into draw pile to fix draw pile exhaustion.
+        Does NOT affect other players' hands.
+        """
         with self.lock:
             if self.game.phase != GamePhase.POINT_OF_ORDER:
                 self._send_error(client_socket, "Can only shuffle cards during Point of Order")
                 return
 
-            target_id = message.data.get("target_id")
-            if not target_id:
-                # Shuffle own deck
-                target_id = player_id
+            # Check if draw pile is empty or low
+            draw_count = self.game.draw_pile.remaining() if self.game.draw_pile else 0
+            discard_count = len(self.game.discard_pile)
 
-            target = self.game.get_player(target_id)
-            if not target:
-                self._send_error(client_socket, "Player not found")
+            if discard_count <= 1:
+                self._send_error(client_socket, "Not enough cards in discard pile to shuffle")
                 return
-
-            # Shuffle the target's hand
-            import random
-            random.shuffle(target.hand)
 
             client = self.clients.get(player_id)
             shuffler_name = client.player_name if client else player_id
 
-            self._broadcast(Message(
-                type=MessageType.NOTIFICATION,
-                data={"message": f"{shuffler_name} shuffled {target.name}'s cards", "event_type": "poo_action"}
-            ))
+            # Take all but top card from discard, shuffle into draw pile
+            import random
+            top_card = self.game.discard_pile[-1]
+            cards_to_shuffle = self.game.discard_pile[:-1]
 
-            # Send hand update to the target
-            self._send_hand_update(target_id)
+            if cards_to_shuffle:
+                self.game.draw_pile.add_cards(cards_to_shuffle)
+                self.game.draw_pile.shuffle()
+                self.game.discard_pile = [top_card]
+
+                self._broadcast(Message(
+                    type=MessageType.NOTIFICATION,
+                    data={
+                        "message": f"{shuffler_name} shuffled {len(cards_to_shuffle)} card(s) from discard into draw pile. Draw pile now has {self.game.draw_pile.remaining()} cards.",
+                        "event_type": "poo_action"
+                    }
+                ))
+                self._broadcast_game_state()
+            else:
+                self._send_error(client_socket, "No cards to shuffle")
 
     def _handle_view_hand(self, message: Message, client_socket: socket.socket,
                            player_id: str) -> None:
-        """Handle view hand request during Point of Order (notifies other players)."""
+        """
+        Handle view own hand during Point of Order.
+        Only shows player's own hand. Announces to all players that they looked.
+        """
         with self.lock:
             if self.game.phase != GamePhase.POINT_OF_ORDER:
-                self._send_error(client_socket, "Can only view hands during Point of Order")
+                self._send_error(client_socket, "Can only view hand during Point of Order")
                 return
 
-            target_id = message.data.get("target_id")
-            if not target_id:
-                target_id = player_id
-
-            target = self.game.get_player(target_id)
-            if not target:
+            player = self.game.get_player(player_id)
+            if not player:
                 self._send_error(client_socket, "Player not found")
                 return
 
-            viewer = self.clients.get(player_id)
-            viewer_name = viewer.player_name if viewer else player_id
+            client = self.clients.get(player_id)
+            viewer_name = client.player_name if client else player_id
 
-            # Send the hand to the requester
+            # Send the hand to the requester (only their own hand)
             self._send_message(client_socket, Message(
                 type=MessageType.HAND_UPDATE,
-                data={"hand": [card.to_dict() for card in target.hand]}
+                data={"hand": [card.to_dict() for card in player.hand]}
             ))
 
-            # Notify all players (except viewer if viewing own hand)
-            if target_id != player_id:
-                self._broadcast(Message(
-                    type=MessageType.NOTIFICATION,
-                    data={"message": f"{viewer_name} viewed {target.name}'s hand", "event_type": "poo_action"}
-                ), exclude={player_id})
+            # Announce to ALL players that this person looked at their hand
+            self._broadcast(Message(
+                type=MessageType.NOTIFICATION,
+                data={"message": f"{viewer_name} looked at their hand", "event_type": "poo_action"}
+            ))
 
     # --- Utility Methods ---
 

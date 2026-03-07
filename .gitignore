@@ -50,6 +50,3 @@ Thumbs.db
 # Project specific
 *.log
 *.tmp
-
-# Claude Code worktrees
-.claude/worktrees/

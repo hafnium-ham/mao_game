@@ -12,7 +12,7 @@ Mao is a card game where "The Only Rule i can Tell You Is This One". This provid
 - **Variable decks** - Configure number of standard 52-card decks
 - **Rich command system** - View cards, play, draw, knock, chat, throw, hit, give penalties
 - **Point of Order** - Dispute resolution system with voting on penalties
-- **Mao Declaration** - Win by playing all cards and declaring "Mao!"
+- **Mao Declaration** - declare "Mao!"
 
 ## Installation
 
@@ -83,7 +83,7 @@ Examples: `H7`, `AS`, `10D`, `KC`
 | `throw <card> <player>` | Throw a card at another player |
 | `hit <player>` | Hit another player |
 | `penalty <player> [reason] [-r]` | Give penalty cards. Use `-r` to return their last played card |
-| `mao` | Declare Mao (win with 10 second challenge window) |
+| `mao` | Declare Mao |
 | `cancel mao` | Cancel a Mao declaration |
 
 ### Point of Order Commands

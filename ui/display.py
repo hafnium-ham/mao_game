@@ -59,17 +59,17 @@ class GameDisplay:
   {Colors.GREEN}penalty{Colors.RESET} <player> [-r] <reason> - Give penalty (-r: return card too)
   {Colors.GREEN}players{Colors.RESET}, pls       - View all players
   {Colors.GREEN}mao{Colors.RESET}               - Declare Mao (10s for others to challenge)
-  {Colors.GREEN}cancel{Colors.RESET}            - Cancel your Mao declaration
+  {Colors.GREEN}cancel{Colors.RESET}            - Cancel any active Mao declaration
 
   {Colors.BOLD}Point of Order:{Colors.RESET}
-  {Colors.MAGENTA}poo{Colors.RESET} [reason]      - Call Point of Order (pauses game)
+  {Colors.MAGENTA}Point of Order{Colors.RESET}   - Call Point of Order (exact phrase required)
+  {Colors.MAGENTA}End Point of Order{Colors.RESET} / {Colors.MAGENTA}epoo{Colors.RESET} - End Point of Order
   {Colors.MAGENTA}vote{Colors.RESET} <penalty #>  - Start a vote on a penalty during POO
   {Colors.MAGENTA}uphold{Colors.RESET}            - Vote to uphold the penalty
   {Colors.MAGENTA}overturn{Colors.RESET}          - Vote to overturn the penalty
   {Colors.MAGENTA}abstain{Colors.RESET}           - Abstain from voting
-  {Colors.MAGENTA}end point of order{Colors.RESET} / {Colors.MAGENTA}epoo{Colors.RESET} - End Point of Order
-  {Colors.MAGENTA}shuffle{Colors.RESET} [player]  - Shuffle a player's cards (or own)
-  {Colors.MAGENTA}view{Colors.RESET} [player]     - View a player's hand (others notified)
+  {Colors.MAGENTA}shuffle{Colors.RESET}           - Shuffle discard into draw pile (fix deck exhaustion)
+  {Colors.MAGENTA}hand{Colors.RESET}              - View your hand (announces to all during POO)
 
   {Colors.BOLD}Other:{Colors.RESET}
   {Colors.DIM}help, ?            - Show this help
@@ -176,14 +176,8 @@ class GameDisplay:
 
             print(f"    {name}{you_marker}: {card_str}")
 
-        # Show your hand inline
-        if player_id:
-            for p in state.get("players", []):
-                if p.get("id") == player_id and "hand" in p:
-                    hand_cards = [Card.from_dict(c) for c in p["hand"]]
-                    if hand_cards:
-                        self.show_hand(hand_cards)
-                    break
+        # Show your hand inline - ONLY during POO, not during normal play
+        # User must use 'hand' command to see their cards
 
         # Point of Order info
         poo_data = state.get("point_of_order")

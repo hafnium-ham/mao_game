@@ -38,9 +38,11 @@ client:
 	cd mao_game && python3 client_main.py --host $(or $(HOST), localhost) --port $(or $(PORT), 5555) --name "$(or $(NAME), Player)"
 
 # Run tests
+# Always cd to the project root (parent of mao_game/) so the mao_game package
+# is on sys.path and the test discovery path mao_game/tests is correct.
 test:
 	@echo "Running tests..."
-	python3 -m unittest discover -s mao_game/tests -v
+	cd "$(CURDIR)/.." && python3 -m unittest discover -s mao_game/tests -v
 
 # Clean up compiled files
 clean:

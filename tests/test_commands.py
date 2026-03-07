@@ -244,10 +244,14 @@ class TestBasicGameCommands(unittest.TestCase):
         self.game.add_player(self.player2)
         self.game.start_game()
 
-        # Create a card that player doesn't own
-        fake_card = Card(Suit.SPADES, Rank.ACE)
-        while self.player1.has_card(fake_card):
-            fake_card = Card(Suit.SPADES, Rank.SEVEN)
+        # Find a card guaranteed NOT in player1's hand.
+        # Player has only 5 of 52 cards, so this always terminates quickly.
+        fake_card = next(
+            Card(suit, rank)
+            for suit in Suit
+            for rank in Rank
+            if not self.player1.has_card(Card(suit, rank))
+        )
 
         # ACTIONS
         result = self.game.play_card("p1", fake_card)
@@ -1067,10 +1071,14 @@ class TestThrowAndHit(unittest.TestCase):
         self.game.add_player(self.player2)
         self.game.start_game()
 
-        # Card not in player's hand
-        fake_card = Card(Suit.SPADES, Rank.ACE)
-        while self.player1.has_card(fake_card):
-            fake_card = Card(Suit.CLUBS, Rank.TEN)
+        # Find a card guaranteed NOT in player1's hand.
+        # Player has only 5 of 52 cards, so this always terminates quickly.
+        fake_card = next(
+            Card(suit, rank)
+            for suit in Suit
+            for rank in Rank
+            if not self.player1.has_card(Card(suit, rank))
+        )
 
         # ACTIONS
         result = self.game.throw_card("p1", fake_card, "p2")

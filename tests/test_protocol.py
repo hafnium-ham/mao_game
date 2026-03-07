@@ -1,7 +1,13 @@
 """Tests for network protocol."""
 
 import unittest
-from network.protocol import Message, MessageType, Protocol
+import sys
+import os
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from mao_game.network.protocol import Message, MessageType, Protocol
 
 
 class TestMessage(unittest.TestCase):

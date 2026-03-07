@@ -1,8 +1,14 @@
 """Tests for Deck class."""
 
 import unittest
-from core.deck import Deck
-from core.card import Card, Suit, Rank
+import sys
+import os
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from mao_game.core.deck import Deck
+from mao_game.core.card import Card, Suit, Rank
 
 
 class TestDeck(unittest.TestCase):

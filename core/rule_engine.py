@@ -5,20 +5,10 @@ import re
 from typing import Dict, List, Any, Optional, Callable, Tuple
 from dataclasses import dataclass, field
 from pathlib import Path
-from enum import Enum
 
 from .card import Card, Suit, Rank
 from .player import Player
 from .game import Game
-
-
-class RuleType(Enum):
-    """Types of rules."""
-    CARD_EFFECT = "card_effect"
-    SPEECH = "speech"
-    TIMING = "timing"
-    PLAY = "play"
-    CONSECUTIVE = "consecutive"
 
 
 @dataclass

@@ -2,7 +2,7 @@
 
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass, field
-from .card import Card, Suit, Rank
+from .card import Card, Suit, Rank, SUIT_ORDER
 
 
 @dataclass
@@ -100,8 +100,7 @@ class Player:
         elif by_rank:
             self.hand.sort(key=lambda c: c.rank.sort_value)
         elif by_suit:
-            suit_order = [Suit.HEARTS, Suit.DIAMONDS, Suit.CLUBS, Suit.SPADES]
-            self.hand.sort(key=lambda c: suit_order.index(c.suit))
+            self.hand.sort(key=lambda c: SUIT_ORDER.index(c.suit))
 
     def get_cards_by_suit(self, suit: Suit) -> List[Card]:
         """Get all cards of a specific suit."""

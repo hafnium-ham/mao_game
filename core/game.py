@@ -8,7 +8,7 @@ import time
 import random
 
 # Time window (seconds) after POO starts during which players can pick up cards without announcement
-POO_HAND_TOGGLE_WINDOW = 5.0
+# POO_HAND_TOGGLE_WINDOW = 5.0  # Currently unused, may be needed for future feature
 
 from .card import Card
 from .deck import Deck
@@ -608,6 +608,9 @@ class Game:
         return [{"player_name": name, "card": card.to_dict()} for name, card in recent]
 
     # --- Point of Order ---
+    # Point of Order (POO) allows players to pause the game to discuss rules and vote on penalties.
+    # Flow: initiate_point_of_order() -> start_penalty_vote() -> add_vote() -> check_vote_result() -> resolve_penalty_vote()
+    # During POO: normal play is suspended, players can view hands (announced), and vote on penalty disputes.
 
     def initiate_point_of_order(self, caller_id: str, reason: str = "General dispute") -> bool:
         """
@@ -801,6 +804,10 @@ class Game:
         return resolution
 
     # --- Penalties ---
+    # Penalty lifecycle:
+    # 1. give_penalty() creates a PendingPenalty and adds to pending_penalties + penalty_history
+    # 2. apply_penalty() draws cards from deck to target player, removes from pending_penalties
+    # 3. During POO, penalties can be voted on to be overturned
 
     def give_penalty(self, caller_id: str, target_id: str, reason: str,
                      cards: int = 1) -> Optional[PendingPenalty]:
@@ -870,6 +877,9 @@ class Game:
         return None
 
     # --- Mao Declaration ---
+    # Mao declaration: player announces "Mao" on their last card to win.
+    # Other players have a limited time to challenge (give penalty for incorrect Mao).
+    # If unchallenged, the declaring player wins.
 
     def start_mao_declaration(self, player_id: str) -> bool:
         """

@@ -23,7 +23,6 @@ class CommandParser:
 
     def __init__(self):
         """Initialize the command parser."""
-        self.commands: Dict[str, Callable] = {}
         self.aliases: Dict[str, str] = {}
         self._setup_commands()
 

@@ -10,10 +10,10 @@ import time
 
 from .protocol import Message, MessageType, Protocol
 from .game_session import GameSession
-from core.game import Game, GamePhase
-from core.player import Player
-from core.card import Card
-from config.settings import MAO_CHALLENGE_TIME, PENALTY_ACTION_DELAY, RECENT_CARDS_SHOWN, RECENT_CARDS_SHOWN_POO
+from ..core.game import Game, GamePhase
+from ..core.player import Player
+from ..core.card import Card
+from ..config.settings import MAO_CHALLENGE_TIME, PENALTY_ACTION_DELAY, RECENT_CARDS_SHOWN, RECENT_CARDS_SHOWN_POO
 
 
 @dataclass
@@ -48,7 +48,10 @@ class GameServer:
         self.running = False
         self.lock = threading.RLock()
 
-        # Mao declaration timer
+        # Mao declaration timer - runs in separate thread
+        # When a player declares Mao, a Timer thread is started that fires after MAO_CHALLENGE_TIME seconds.
+        # The timer can be cancelled if: (1) someone challenges with a penalty, (2) someone cancels the declaration.
+        # Thread safety: timer operations are protected by self.lock (RLock for re-entrant access).
         self.mao_timer: Optional[threading.Timer] = None
 
         # Message handlers mapped by MessageType
@@ -791,7 +794,9 @@ class GameServer:
 
                 from config.settings import MAO_CHALLENGE_TIME
 
-                # Start timer in a separate thread
+                # Start timer in a separate daemon thread
+                # daemon=True ensures timer thread won't block server shutdown
+                # When timer expires, _mao_timer_expired callback runs (acquires lock)
                 self.mao_timer = threading.Timer(MAO_CHALLENGE_TIME, self._mao_timer_expired, args=[player_id])
                 self.mao_timer.daemon = True
                 self.mao_timer.start()
@@ -799,7 +804,9 @@ class GameServer:
                 print(f"{player.name} declared Mao - {MAO_CHALLENGE_TIME} second timer started")
 
     def _mao_timer_expired(self, player_id: str) -> None:
-        """Called when the 6-second Mao declaration timer expires."""
+        """Callback when Mao declaration timer expires. Player wins if unchallenged."""
+        # Thread safety: acquire lock before modifying game state
+        # This prevents race conditions with penalty handlers that might cancel the timer
         with self.lock:
             # Check if the declaration is still active (wasn't cancelled by penalty)
             if self.game.mao_declaring_player_id != player_id:

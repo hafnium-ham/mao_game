@@ -2,9 +2,8 @@
 
 import os
 from typing import List, Dict, Any, Optional
-from mao_game.colors import Colors, colorize, bold, dim, red, green, yellow, cyan
+from mao_game.ui.colors import Colors, colorize, bold, dim, red, green, yellow, cyan
 from mao_game.core.card import Card, Suit
-from mao_game.config.settings import RECENT_CARDS_SHOWN, RECENT_CARDS_SHOWN_POO
 
 
 class GameDisplay:

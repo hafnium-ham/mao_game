@@ -108,7 +108,7 @@ For more information, see: https://github.com/example/mao-game
     args = parser.parse_args()
 
     if args.mode == "server":
-        from network.server import GameServer
+        from mao_game.network.server import GameServer
 
         print(f"""
 ╔══════════════════════════════════════╗
@@ -125,7 +125,7 @@ For more information, see: https://github.com/example/mao-game
 
         # Load custom rules if provided
         if args.rules:
-            from core.rule_engine import RuleEngine
+            from mao_game.core.rule_engine import RuleEngine
             server.rule_engine = RuleEngine(args.rules)
 
         try:
@@ -135,7 +135,7 @@ For more information, see: https://github.com/example/mao-game
             server.stop()
 
     elif args.mode == "client":
-        from network.client import GameClient
+        from mao_game.network.client import GameClient
 
         client = GameClient(
             host=args.host,

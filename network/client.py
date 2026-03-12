@@ -8,8 +8,8 @@ from typing import Optional, List, Dict, Any
 from queue import Queue, Empty
 
 from .protocol import Message, MessageType, Protocol
-from core.card import Card, Suit, Rank
-from ui.display import GameDisplay
+from ..core.card import Card, Suit, Rank
+from ..ui.display import GameDisplay
 
 
 class GameClient:

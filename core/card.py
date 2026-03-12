@@ -41,6 +41,10 @@ class Suit(Enum):
         return self in (Suit.HEARTS, Suit.DIAMONDS)
 
 
+# Standard suit ordering for card sorting: hearts, diamonds, clubs, spades
+SUIT_ORDER = [Suit.HEARTS, Suit.DIAMONDS, Suit.CLUBS, Suit.SPADES]
+
+
 class Rank(Enum):
     """Card ranks with display values."""
     ACE = ("A", 1, 14)
@@ -97,13 +101,11 @@ class Card:
         return f"Card({self.suit.full_name}, {self.rank.display})"
 
     def __lt__(self, other: "Card") -> bool:
-        """Compare cards for sorting (by suit, then rank)."""
+        """Compare cards for sorting: by suit order (hearts, diamonds, clubs, spades), then by rank."""
         if not isinstance(other, Card):
             return NotImplemented
-        # Sort by suit first, then by rank
-        suit_order = [Suit.HEARTS, Suit.DIAMONDS, Suit.CLUBS, Suit.SPADES]
-        self_suit_idx = suit_order.index(self.suit)
-        other_suit_idx = suit_order.index(other.suit)
+        self_suit_idx = SUIT_ORDER.index(self.suit)
+        other_suit_idx = SUIT_ORDER.index(other.suit)
         if self_suit_idx != other_suit_idx:
             return self_suit_idx < other_suit_idx
         return self.rank.sort_order < other.rank.sort_order

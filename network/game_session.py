@@ -43,28 +43,6 @@ class GameSession:
         except socket.error:
             return False
 
-    def receive_message(self) -> Optional[Message]:
-        """
-        Receive a message from this client.
-
-        Returns:
-            A complete Message if available, None otherwise.
-        """
-        if not self.socket:
-            return None
-
-        try:
-            data = self.socket.recv(4096)
-            if not data:
-                return None  # Connection closed
-
-            self.buffer += data
-            message, self.buffer = Protocol.decode_message(self.buffer)
-            return message
-
-        except socket.error:
-            return None
-
     def close(self) -> None:
         """Close the socket connection."""
         if self.socket:

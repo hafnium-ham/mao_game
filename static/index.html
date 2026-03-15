@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mao Card Game</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Connection Screen -->
+        <div id="connect-screen" class="screen">
+            <h1>🃏 Mao Card Game</h1>
+            <div class="connect-form">
+                <input type="text" id="player-name" placeholder="Enter your name" maxlength="20">
+                <button id="connect-btn">Join Game</button>
+            </div>
+            <div id="connection-status" class="status"></div>
+        </div>
+
+        <!-- Lobby Screen -->
+        <div id="lobby-screen" class="screen hidden">
+            <h2>Game Lobby</h2>
+            <div class="lobby-info">
+                <span>Players: <span id="player-count">0</span>/<span id="max-players">10</span></span>
+                <span>Decks: <span id="deck-count">1</span></span>
+                <button id="settings-btn" class="icon-btn" title="Settings">⚙️</button>
+            </div>
+            <div id="players-list" class="players-list"></div>
+            <div class="lobby-actions">
+                <button id="start-btn" disabled>Start Game</button>
+                <button id="leave-btn">Leave</button>
+            </div>
+        </div>
+
+        <!-- Game Screen -->
+        <div id="game-screen" class="screen hidden">
+            <!-- Players arranged around the center (UNO-style) -->
+            <div id="game-container">
+                <!-- Player positions will be dynamically generated -->
+            </div>
+
+            <!-- Center: Discard pile and draw pile -->
+            <div class="game-center" id="game-center">
+                <div id="draw-pile" class="card-pile">
+                    <div class="pile-label">Draw (<span id="draw-count">0</span>)</div>
+                    <div class="card back" onclick="drawCard()">Draw</div>
+                </div>
+                <div id="discard-pile" class="card-pile">
+                    <div class="pile-label">Discard</div>
+                    <div id="top-card" class="card"></div>
+                </div>
+                <!-- Recent cards shown near discard -->
+                <div id="recent-cards" class="recent-cards"></div>
+            </div>
+
+            <!-- Current player's hand (always at bottom) -->
+            <div class="player-area">
+                <div class="player-info">
+                    <span id="current-player-name">You</span>
+                    <span class="card-count">Cards: <span id="my-card-count">0</span></span>
+                    </div>
+                <div id="my-hand" class="hand"></div>
+            </div>
+
+            <!-- Game actions -->
+            <div id="actions-panel" class="actions-panel">
+                <button id="knock-btn" onclick="sendKnock()">Knock</button>
+                <button id="say-btn" onclick="showSayDialog()">Say</button>
+                <button id="penalty-btn" onclick="showPenaltyDialog()">Give Penalty</button>
+                <button id="mao-btn" onclick="declareMao()">Declare Mao!</button>
+                <button id="view-hand-btn" class="hidden" onclick="toggleViewHand()">👁️ View Hand</button>
+            </div>
+
+            <!-- Notifications/Log -->
+            <div id="notifications" class="notifications"></div>
+
+            <!-- POO Indicator -->
+            <div id="poo-indicator" class="poo-indicator hidden">
+                <span>🔴 POINT OF ORDER</span>
+                <span id="poo-reason-text"></span>
+            </div>
+        </div>
+
+        <!-- Player Action Modal (click on player) -->
+        <div id="player-action-modal" class="modal hidden">
+            <div class="modal-content">
+                <h3 id="player-action-name">Player Name</h3>
+                <p class="player-card-count">Cards: <span id="player-card-count">0</span></p>
+                <div class="modal-actions player-actions">
+                    <button onclick="hitPlayer()" class="action-btn hit-btn">👊 Hit</button>
+                    <button onclick="showThrowCardDialog()" class="action-btn throw-btn">🃏 Throw Card</button>
+                    <button onclick="showPenaltyDialogForPlayer()" class="action-btn penalty-btn">⚠️ Give Penalty</button>
+                    <button onclick="closePlayerModal()" class="action-btn cancel-btn">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Throw Card Dialog -->
+        <div id="throw-card-modal" class="modal hidden">
+            <div class="modal-content">
+                <h3>Throw Card at <span id="throw-target-name"></span></h3>
+                <p>Select a card from your hand to throw:</p>
+                <div id="throw-hand" class="hand throw-hand"></div>
+                <div class="modal-actions">
+                    <button onclick="closeThrowModal()">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Penalty Modal -->
+        <div id="penalty-modal" class="modal hidden">
+            <div class="modal-content">
+                <h3>Give Penalty</h3>
+                <p>Target: <strong id="penalty-target"></strong></p>
+                <div class="form-group">
+                    <label>Reason:</label>
+                    <select id="penalty-reason">
+                        <option value="">Select a reason...</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Or custom reason:</label>
+                    <input type="text" id="penalty-custom-reason" placeholder="Enter custom reason">
+                </div>
+                <div class="form-group">
+                    <label>Cards: <input type="number" id="penalty-cards" value="1" min="1" max="5" style="width: 60px"></label>
+                </div>
+                <div class="modal-actions">
+                    <button onclick="submitPenalty()">Give Penalty</button>
+                    <button onclick="closePenaltyModal()">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Modal -->
+        <div id="settings-modal" class="modal hidden">
+            <div class="modal-content settings-content">
+                <h3>⚙️ Settings</h3>
+                <div class="settings-section">
+                    <h4>Penalty Quick Reasons</h4>
+                    <p class="hint">Add common penalty reasons for quick selection</p>
+                    <div id="penalty-reasons-list" class="reasons-list"></div>
+                    <div class="add-reason">
+                        <input type="text" id="new-reason" placeholder="New reason">
+                        <button onclick="addPenaltyReason()">Add</button>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button onclick="closeSettingsModal()">Done</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Point of Order Modal -->
+        <div id="poo-modal" class="modal hidden">
+            <div class="modal-content poo-content">
+                <h3>🔴 Point of Order</h3>
+                <div id="poo-active-info">
+                    <p>Reason: <span id="poo-reason"></span></p>
+                    <p>Called by: <span id="poo-caller"></span></p>
+                </div>
+                <div class="poo-actions">
+                    <button onclick="viewMyHand()">👁️ View My Hand</button>
+                    <button onclick="shuffleDeck()">🔀 Shuffle Discard into Deck</button>
+                    <button onclick="endPoo()">End Point of Order</button>
+                </div>
+                <div id="poo-penalty-history" class="penalty-history">
+                    <h4>Penalty History</h4>
+                    <div id="penalty-list"></div>
+                </div>
+                <div id="poo-viewing-hands" class="viewing-hands">
+                    <!-- Players viewing their hands shown here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Say Dialog Modal -->
+        <div id="say-modal" class="modal hidden">
+            <div class="modal-content">
+                <h3>Say Something</h3>
+                <input type="text" id="say-input" placeholder="Enter message" autocomplete="off">
+                <p class="hint">Say "point of order" to call a Point of Order</p>
+                <p class="hint">Say "end point of order" to end it</p>
+                <div class="modal-actions">
+                    <button onclick="sendSay()">Send</button>
+                    <button onclick="closeSayModal()">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Game Over Modal -->
+        <div id="game-over-modal" class="modal hidden">
+            <div class="modal-content">
+                <h2>🎉 Game Over! 🎉</h2>
+                <p id="winner-text"></p>
+                <button onclick="location.reload()">Play Again</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/client.js"></script>
+</body>
+</html>

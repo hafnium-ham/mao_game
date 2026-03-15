@@ -81,6 +81,11 @@ For more information, see: https://github.com/example/mao-game
         default=None,
         help="Path to custom rules JSON file"
     )
+    server_parser.add_argument(
+        "--web",
+        action="store_true",
+        help="Start WebSocket server for browser clients (default port 8080)"
+    )
 
     # Client arguments
     client_parser = subparsers.add_parser(
@@ -108,31 +113,50 @@ For more information, see: https://github.com/example/mao-game
     args = parser.parse_args()
 
     if args.mode == "server":
-        from mao_game.network.server import GameServer
+        if args.web:
+            from mao_game.network.websocket_server import WebSocketGameServer
 
-        print(f"""
+            port = args.port if args.port != 5555 else 8080
+
+            print(f"""
+╔══════════════════════════════════════╗
+║       MAO WEBSOCKET SERVER           ║
+║   Open http://{args.host}:{port} in your browser  ║
+╚══════════════════════════════════════╝
+            """)
+
+            server = WebSocketGameServer(
+                host=args.host,
+                port=port,
+                num_decks=args.decks,
+                max_players=args.max_players
+            )
+            server.start()
+        else:
+            from mao_game.network.server import GameServer
+
+            print(f"""
 ╔══════════════════════════════════════╗
 ║         MAO GAME SERVER              ║
 ╚══════════════════════════════════════╝
         """)
 
-        server = GameServer(
-            host=args.host,
-            port=args.port,
-            num_decks=args.decks,
-            max_players=args.max_players
-        )
+            server = GameServer(
+                host=args.host,
+                port=args.port,
+                num_decks=args.decks,
+                max_players=args.max_players
+            )
 
-        # Load custom rules if provided
-        if args.rules:
-            from mao_game.core.rule_engine import RuleEngine
-            server.rule_engine = RuleEngine(args.rules)
+            if args.rules:
+                from mao_game.core.rule_engine import RuleEngine
+                server.rule_engine = RuleEngine(args.rules)
 
-        try:
-            server.start()
-        except KeyboardInterrupt:
-            print("\nShutting down...")
-            server.stop()
+            try:
+                server.start()
+            except KeyboardInterrupt:
+                print("\nShutting down...")
+                server.stop()
 
     elif args.mode == "client":
         from mao_game.network.client import GameClient

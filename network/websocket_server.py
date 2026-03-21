@@ -170,14 +170,19 @@ class WebSocketGameServer:
 
             player = Player(id=player_id, name=self.clients[player_id]['name'])
             if self.game.add_player(player):
+                player_name = self.clients[player_id]['name']
+                print(f"Player {player_name} ({player_id}) added to game. Total players: {len(self.game.players)}")
+
                 await self._broadcast(Message(
                     type=MessageType.NOTIFICATION,
-                    data={"message": f"{self.clients[player_id]['name']} joined the game"}
+                    data={"message": f"{player_name} joined the game"}
                 ))
                 await self._send_player_list(player_id)
                 await self._broadcast_game_state()
-                print(f"Player {self.clients[player_id]['name']} joined ({len(self.game.players)}/{self.max_players})")
+
+                print(f"Player {player_name} joined ({len(self.game.players)}/{self.max_players})")
             else:
+                print(f"Failed to add player to game")
                 await self._send_error(player_id, "Could not join game")
 
     async def _handle_leave(self, message: Message, player_id: str):
@@ -194,9 +199,18 @@ class WebSocketGameServer:
     async def _handle_start(self, message: Message, player_id: str):
         """Handle request to start the game."""
         async with self.lock:
-            if not self.game or not self.game.can_start():
+            if not self.game:
+                print(f"Start game failed: no game instance")
+                await self._send_error(player_id, "No game exists")
+                return
+
+            player_count = len(self.game.players)
+            min_players = self.game.min_players
+            print(f"Start game request: {player_count} players, need {min_players} minimum")
+
+            if not self.game.can_start():
                 await self._send_error(player_id,
-                    f"Need at least {self.game.min_players if self.game else 2} players to start")
+                    f"Need at least {min_players} players to start. Currently have {player_count}.")
                 return
 
             if self.game.start_game():
@@ -787,8 +801,11 @@ class WebSocketGameServer:
             ws = client['ws']
             try:
                 await ws.send_str(message.to_json())
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Error sending message to {player_id}: {e}")
+                # Don't remove client here - let disconnect handler do it
+        else:
+            print(f"Warning: No websocket for player {player_id}")
 
     async def _send_error(self, player_id: str, error_message: str):
         """Send an error message to a player."""
@@ -839,13 +856,22 @@ class WebSocketGameServer:
         if not self.game:
             return
 
+        player_count = len(self.game.players)
+        client_count = len(self.clients)
+        print(f"Broadcasting game state: {player_count} players in game, {client_count} connected clients")
+        print(f"Player IDs in game: {[p.id for p in self.game.players]}")
+        print(f"Connected client IDs: {list(self.clients.keys())}")
+
         for player_id in self.clients:
             state = self.game.to_dict(for_player_id=player_id)
-            await self._send_message(player_id, Message(
-                type=MessageType.GAME_STATE,
-                player_id=player_id,
-                data=state
-            ))
+            try:
+                await self._send_message(player_id, Message(
+                    type=MessageType.GAME_STATE,
+                    player_id=player_id,
+                    data=state
+                ))
+            except Exception as e:
+                print(f"Failed to send game state to {player_id}: {e}")
 
     async def _disconnect_client(self, player_id: str):
         """Handle client disconnection."""

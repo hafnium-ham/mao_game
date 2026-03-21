@@ -227,16 +227,16 @@ function updateGameDisplay() {
 }
 
 function updatePlayerPositions() {
-    const container = document.getElementById('other-players');
-    container.innerHTML = '';
+    const container = document.getElementById('game-container');
+    // Clear only player slots, keep other elements
+    container.querySelectorAll('.player-slot').forEach(el => el.remove());
 
     if (!gameState || !gameState.players) return;
 
     // Get other players (not me)
     const otherPlayers = gameState.players.filter(p => p.id !== playerId);
 
-    // Position other players around the center
-    // For N players, distribute evenly in top/left/right positions
+    // Position other players at the top of the screen
     otherPlayers.forEach((player, index) => {
         const div = document.createElement('div');
         div.className = 'player-slot';
@@ -245,15 +245,11 @@ function updatePlayerPositions() {
             div.classList.add('current-turn');
         }
 
-        // Simple positioning: distribute around the center
-        // Positions: top, top-right, right, left, top-left, etc.
         const total = otherPlayers.length;
-        const positions = getPlayerPositions(total);
-        const pos = positions[index];
+        const pos = getPlayerPositions(total)[index];
 
         div.style.left = pos.left;
         div.style.top = pos.top;
-        div.style.transform = 'translate(-50%, -50%)';
 
         const avatar = document.createElement('div');
         avatar.className = 'player-avatar';
@@ -265,13 +261,12 @@ function updatePlayerPositions() {
 
         const countDiv = document.createElement('div');
         countDiv.className = 'player-card-count';
-        countDiv.textContent = `${player.card_count || 0} cards`;
+        countDiv.textContent = `${player.card_count || 0}`;
 
         div.appendChild(avatar);
         div.appendChild(nameDiv);
         div.appendChild(countDiv);
 
-        // Click to show actions
         div.addEventListener('click', () => showPlayerActions(player));
 
         container.appendChild(div);
@@ -279,30 +274,14 @@ function updatePlayerPositions() {
 }
 
 function getPlayerPositions(count) {
-    // Generate positions around the center, avoiding bottom (reserved for me)
-    // Returns array of {left, top} as percentages
+    // Simple horizontal layout at the top of the screen
     const positions = [];
-
-    // Spread players evenly in the upper portion of the screen
-    // Angles from -150 to -30 degrees (top left to top right)
     for (let i = 0; i < count; i++) {
-        const angle = -150 + (120 / Math.max(count - 1, 1)) * i;
-        const radians = angle * Math.PI / 180;
-
-        // Use 40% radius from center
-        const radius = 40;
-        const centerX = 50;
-        const centerY = 35;
-
-        const x = centerX + radius * Math.cos(radians);
-        const y = centerY + radius * Math.sin(radians);
-
         positions.push({
-            left: `${x}%`,
-            top: `${y}%`
+            left: `${(i + 1) * (100 / (count + 1))}%`,
+            top: '60px'
         });
     }
-
     return positions;
 }
 

@@ -178,70 +178,58 @@ body {
     color: white;
 }
 
-/* Game Screen - UNO Style Layout */
+/* Game Screen */
 #game-screen {
     display: flex;
     flex-direction: column;
-    height: 100vh;
-    padding: 10px;
+    min-height: 100vh;
     position: relative;
 }
 
 #game-container {
-    flex: 1;
     position: relative;
-    min-height: 300px;
+    min-height: 200px;
 }
 
-/* Players arranged in circle around center */
+/* Player slots - positioned at top */
 .player-slot {
     position: absolute;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 5px;
+    gap: 4px;
     cursor: pointer;
+    padding: 8px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.1);
     transition: transform 0.2s;
 }
 
 .player-slot:hover {
     transform: scale(1.05);
-}
-
-.player-slot.me {
-    /* Current player is always at bottom, handled separately */
+    background: rgba(255,255,255,0.2);
 }
 
 .player-avatar {
-    width: 60px;
-    height: 60px;
+    width: 50px;
+    height: 50px;
     border-radius: 50%;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: #4a90d9;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.5rem;
+    font-size: 1.3rem;
     font-weight: bold;
-    border: 3px solid transparent;
-    position: relative;
+    border: 2px solid transparent;
 }
 
 .player-slot.current-turn .player-avatar {
     border-color: #FFD700;
-    box-shadow: 0 0 15px rgba(255, 215, 0, 0.5);
-    animation: pulse-glow 1.5s infinite;
-}
-
-.player-slot.viewing-hand .player-avatar::after {
-    content: '👁️';
-    position: absolute;
-    top: -8px;
-    right: -8px;
-    font-size: 0.8rem;
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.6);
 }
 
 .player-name {
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     font-weight: bold;
     text-align: center;
     max-width: 80px;
@@ -251,12 +239,8 @@ body {
 }
 
 .player-card-count {
-    font-size: 0.8rem;
+    font-size: 0.75rem;
     opacity: 0.8;
-}
-
-.player-slot.me {
-    /* Not shown in circle - shown at bottom */
 }
 
 @keyframes pulse-glow {
@@ -266,49 +250,38 @@ body {
 
 /* Game Center */
 .game-center {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
     display: flex;
     justify-content: center;
     align-items: center;
-    gap: 30px;
-    padding: 20px;
-    border-radius: 20px;
-    background: rgba(0,0,0,0.2);
+    gap: 40px;
+    padding: 30px;
+    margin-top: 80px;
 }
 
 .card-pile {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
 }
 
 .pile-label {
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     opacity: 0.8;
 }
 
 .recent-cards {
-    position: absolute;
-    right: -80px;
-    top: 50%;
-    transform: translateY(-50%);
     display: flex;
     flex-direction: column;
-    gap: 5px;
-    max-height: 200px;
-    overflow: hidden;
+    gap: 4px;
+    margin-top: 10px;
 }
 
 .recent-card {
     font-size: 0.7rem;
     background: rgba(255,255,255,0.1);
-    padding: 3px 8px;
-    border-radius: 4px;
-    white-space: nowrap;
+    padding: 2px 6px;
+    border-radius: 3px;
 }
 
 /* Cards */

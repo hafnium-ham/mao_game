@@ -26,6 +26,16 @@ Examples:
 
 import argparse
 import sys
+import os
+from pathlib import Path
+
+# Add the mao_game directory to the path for direct execution
+# This allows running main.py directly from the mao_game directory
+if __name__ == "__main__":
+    # When running main.py directly, add the parent directory to sys.path
+    parent_dir = Path(__file__).parent
+    if str(parent_dir) not in sys.path:
+        sys.path.insert(0, str(parent_dir))
 
 
 def main():
@@ -112,10 +122,21 @@ For more information, see: https://github.com/example/mao-game
 
     args = parser.parse_args()
 
+    # Handle imports - try relative imports first (when running from mao_game dir)
+    # then fall back to absolute imports (when running as package)
+    try:
+        from network.websocket_server import WebSocketGameServer
+        from network.server import GameServer
+        from network.client import GameClient
+        from core.rule_engine import RuleEngine
+    except ImportError:
+        from mao_game.network.websocket_server import WebSocketGameServer
+        from mao_game.network.server import GameServer
+        from mao_game.network.client import GameClient
+        from mao_game.core.rule_engine import RuleEngine
+
     if args.mode == "server":
         if args.web:
-            from mao_game.network.websocket_server import WebSocketGameServer
-
             port = args.port if args.port != 5555 else 8080
 
             print(f"""
@@ -133,8 +154,6 @@ For more information, see: https://github.com/example/mao-game
             )
             server.start()
         else:
-            from mao_game.network.server import GameServer
-
             print(f"""
 ╔══════════════════════════════════════╗
 ║         MAO GAME SERVER              ║
@@ -149,7 +168,6 @@ For more information, see: https://github.com/example/mao-game
             )
 
             if args.rules:
-                from mao_game.core.rule_engine import RuleEngine
                 server.rule_engine = RuleEngine(args.rules)
 
             try:
@@ -159,7 +177,6 @@ For more information, see: https://github.com/example/mao-game
                 server.stop()
 
     elif args.mode == "client":
-        from mao_game.network.client import GameClient
 
         client = GameClient(
             host=args.host,

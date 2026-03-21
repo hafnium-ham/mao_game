@@ -13,6 +13,7 @@ import random
 from .card import Card
 from .deck import Deck
 from .player import Player
+from ..config.settings import RECENT_CARDS_SHOWN, RECENT_CARDS_SHOWN_POO
 
 
 class GamePhase(Enum):
@@ -1037,7 +1038,6 @@ class Game:
             data["penalty_history"] = [p.to_dict() for p in self.penalty_history]
 
         # Include recent cards (more during POO)
-        from config.settings import RECENT_CARDS_SHOWN, RECENT_CARDS_SHOWN_POO
         if self.phase == GamePhase.POINT_OF_ORDER:
             data["recent_cards"] = self.get_recent_cards(RECENT_CARDS_SHOWN_POO)
         else:

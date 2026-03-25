@@ -8,6 +8,8 @@ let myHand = [];
 let selectedPlayerId = null;
 let viewingHand = false;
 let pooActive = false;
+let currentLobbyCode = null;
+let currentTheme = 'dark';
 
 // Penalty reasons (stored in localStorage)
 let penaltyReasons = JSON.parse(localStorage.getItem('mao_penaltyReasons')) || [
@@ -18,65 +20,90 @@ let penaltyReasons = JSON.parse(localStorage.getItem('mao_penaltyReasons')) || [
     'Looking at cards during play'
 ];
 
-// Card suit symbols
-const SUIT_SYMBOLS = {
-    'hearts': '♥',
-    'diamonds': '♦',
-    'clubs': '♣',
-    'spades': '♠'
-};
+// Theme management
+function setTheme(theme) {
+    currentTheme = theme;
+    // Simple light/dark toggle
+    if (theme === 'light') {
+        document.body.style.background = '#f5f5f5';
+        document.body.style.color = '#333';
+    } else {
+        document.body.style.background = '';
+        document.body.style.color = '';
+    }
+    localStorage.setItem('mao_theme', theme);
 
-// Message type handlers
-const messageHandlers = {
-    'connect': handleConnect,
-    'player_list': handlePlayerList,
-    'game_state': handleGameState,
-    'hand_update': handleHandUpdate,
-    'card_drawn': handleCardDrawn,
-    'penalty': handlePenalty,
-    'notification': handleNotification,
-    'point_of_order': handlePointOfOrder,
-    'game_over': handleGameOver,
-    'error': handleError,
-    'success': handleSuccess
-};
-
-// Initialize
-document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('connect-btn').addEventListener('click', connect);
-    document.getElementById('player-name').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') connect();
+    // Update active button
+    document.querySelectorAll('.theme-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.theme === theme);
     });
+}
+
+// Initialize theme from localStorage
+document.addEventListener('DOMContentLoaded', () => {
+    const savedTheme = localStorage.getItem('mao_theme') || 'dark';
+    setTheme(savedTheme);
+
+    // Theme buttons
+    document.querySelectorAll('.theme-btn').forEach(btn => {
+        btn.addEventListener('click', () => setTheme(btn.dataset.theme));
+    });
+
+    // Name input enable continue button
+    const nameInput = document.getElementById('player-name');
+    const continueBtn = document.getElementById('continue-btn');
+
+    nameInput.addEventListener('input', () => {
+        continueBtn.disabled = nameInput.value.trim().length < 1;
+    });
+
+    continueBtn.addEventListener('click', handleIntroContinue);
+    nameInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && nameInput.value.trim()) {
+            handleIntroContinue();
+        }
+    });
+
+    // Lobby buttons
+    document.getElementById('create-lobby-btn').addEventListener('click', createLobby);
+    document.getElementById('refresh-lobbies-btn').addEventListener('click', requestLobbyList);
+    document.getElementById('confirm-join-btn').addEventListener('click', confirmJoinLobby);
+
+    // Legacy lobby buttons
     document.getElementById('start-btn').addEventListener('click', startGame);
-    document.getElementById('leave-btn').addEventListener('click', leaveGame);
+    document.getElementById('leave-btn').addEventListener('click', leaveLobby);
     document.getElementById('settings-btn').addEventListener('click', showSettingsModal);
 
     // Populate penalty reasons
     updatePenaltyReasonsSelect();
 });
 
+// Intro screen flow
+function handleIntroContinue() {
+    playerName = document.getElementById('player-name').value.trim();
+    if (!playerName) return;
+
+    // Connect to server
+    connect(() => {
+        // After connection, request lobby list and show lobby browser
+        showScreen('lobby-browser');
+        requestLobbyList();
+    });
+}
+
 // Connection
-function connect() {
-    const nameInput = document.getElementById('player-name');
-    playerName = nameInput.value.trim();
-
-    if (!playerName) {
-        showStatus('Please enter your name', 'error');
-        return;
-    }
-
-    // Determine WebSocket URL
+function connect(callback) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws`;
 
     ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
-        showStatus('Connected!', 'success');
         sendMessage({
             type: 'connect',
             data: { name: playerName }
         });
+        if (callback) callback();
     };
 
     ws.onmessage = (event) => {
@@ -93,6 +120,7 @@ function connect() {
         showStatus('Disconnected from server', 'error');
         playerId = null;
         gameState = null;
+        currentLobbyCode = null;
     };
 
     ws.onerror = (error) => {
@@ -117,15 +145,140 @@ function handleMessage(data) {
     }
 }
 
+// Message type handlers
+const messageHandlers = {
+    'connect': handleConnect,
+    'lobby_list': handleLobbyList,
+    'lobby_created': handleLobbyCreated,
+    'lobby_joined': handleLobbyJoined,
+    'lobby_error': handleLobbyError,
+    'player_list': handlePlayerList,
+    'game_state': handleGameState,
+    'hand_update': handleHandUpdate,
+    'card_drawn': handleCardDrawn,
+    'penalty': handlePenalty,
+    'notification': handleNotification,
+    'point_of_order': handlePointOfOrder,
+    'game_over': handleGameOver,
+    'error': handleError,
+    'success': handleSuccess
+};
+
 // Message Handlers
 function handleConnect(data) {
     playerId = data.player_id || data.data?.player_id;
     const name = data.name || data.data?.name || playerName;
-    showScreen('lobby');
     showStatus(`Connected as ${name}`, 'success');
+}
 
-    // Join the game
+// Lobby Handlers
+function handleLobbyList(data) {
+    const lobbies = data.lobbies || data.data?.lobbies || [];
+    renderLobbyList(lobbies);
+}
+
+function handleLobbyCreated(data) {
+    const code = data.code || data.data?.code;
+    const name = data.name || data.data?.name;
+    currentLobbyCode = code;
+    showStatus(`Lobby "${name}" created! Code: ${code}`, 'success');
+    // Auto-join the lobby
     sendMessage({ type: 'join_game' });
+}
+
+function handleLobbyJoined(data) {
+    const code = data.code || data.data?.code;
+    const name = data.name || data.data?.name;
+    currentLobbyCode = code;
+    showStatus(`Joined lobby "${name}"`, 'success');
+    showScreen('lobby');
+}
+
+function handleLobbyError(data) {
+    const message = data.message || data.data?.message || 'Lobby error';
+    showStatus(message, 'error');
+}
+
+// Lobby Functions
+function requestLobbyList() {
+    sendMessage({ type: 'list_lobbies' });
+}
+
+function createLobby() {
+    const nameInput = document.getElementById('lobby-name-input');
+    const passwordInput = document.getElementById('lobby-password-input');
+    const name = nameInput.value.trim() || 'Game';
+    const password = passwordInput.value.trim();
+
+    if (!password) {
+        showStatus('Please enter a password for your lobby', 'error');
+        return;
+    }
+
+    sendMessage({
+        type: 'create_lobby',
+        data: { name, password }
+    });
+}
+
+let selectedLobbyCode = null;
+
+function confirmJoinLobby() {
+    const passwordInput = document.getElementById('join-password-input');
+    const password = passwordInput.value.trim();
+
+    if (!password) {
+        showStatus('Please enter the password', 'error');
+        return;
+    }
+
+    sendMessage({
+        type: 'join_lobby',
+        data: { code: selectedLobbyCode, password }
+    });
+
+    closeJoinModal();
+}
+
+function showJoinModal(lobbyCode, lobbyName) {
+    selectedLobbyCode = lobbyCode;
+    document.getElementById('join-lobby-name').textContent = lobbyName;
+    document.getElementById('join-password-input').value = '';
+    document.getElementById('join-lobby-modal').classList.remove('hidden');
+}
+
+function closeJoinModal() {
+    document.getElementById('join-lobby-modal').classList.add('hidden');
+    selectedLobbyCode = null;
+}
+
+function renderLobbyList(lobbies) {
+    const container = document.getElementById('lobby-list');
+
+    if (lobbies.length === 0) {
+        container.innerHTML = '<div class="no-lobbies">No lobbies available. Create one!</div>';
+        return;
+    }
+
+    container.innerHTML = lobbies.map(lobby => `
+        <div class="lobby-card" onclick="showJoinModal('${lobby.code}', '${lobby.name}')">
+            <h3>${lobby.name}</h3>
+            <div class="lobby-info">
+                <span>Players: ${lobby.player_count}/${lobby.max_players || 10}</span>
+                <span>Code: ${lobby.code}</span>
+            </div>
+            <span class="lobby-status ${lobby.phase}">${lobby.phase === 'waiting' ? 'Waiting' : 'In Progress'}</span>
+        </div>
+    `).join('');
+}
+
+function leaveLobby() {
+    if (currentLobbyCode) {
+        sendMessage({ type: 'leave_lobby' });
+        currentLobbyCode = null;
+        showScreen('lobby-browser');
+        requestLobbyList();
+    }
 }
 
 function handlePlayerList(data) {

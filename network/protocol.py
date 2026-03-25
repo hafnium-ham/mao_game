@@ -15,6 +15,16 @@ class MessageType(Enum):
     DISCONNECT = "disconnect"     # Client disconnecting
     PLAYER_LIST = "player_list"   # List of connected players
 
+    # Lobby management
+    LIST_LOBBIES = "list_lobbies"       # Request list of lobbies
+    CREATE_LOBBY = "create_lobby"       # Create new lobby
+    JOIN_LOBBY = "join_lobby"           # Join existing lobby
+    LEAVE_LOBBY = "leave_lobby"         # Leave current lobby
+    LOBBY_LIST = "lobby_list"           # Server response: list of lobbies
+    LOBBY_CREATED = "lobby_created"     # Server response: lobby created
+    LOBBY_JOINED = "lobby_joined"       # Server response: lobby joined
+    LOBBY_ERROR = "lobby_error"         # Server response: lobby error
+
     # Game flow
     JOIN_GAME = "join_game"       # Request to join game
     LEAVE_GAME = "leave_game"     # Leave current game

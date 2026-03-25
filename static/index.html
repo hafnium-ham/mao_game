@@ -3,18 +3,93 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mao Card Game</title>
+    <title>Mao</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
     <div id="app">
-        <!-- Connection Screen -->
-        <div id="connect-screen" class="screen">
-            <h1>🃏 Mao Card Game</h1>
-            <div class="connect-form">
-                <input type="text" id="player-name" placeholder="Enter your name" maxlength="20">
-                <button id="connect-btn">Join Game</button>
+        <!-- Intro Screen -->
+        <div id="intro-screen" class="screen">
+            <div class="title">Mao</div>
+
+            <div class="intro-box">
+                <h2>Player Name</h2>
+                <input type="text" id="player-name" placeholder="Enter name" maxlength="20" autofocus>
+                <button id="continue-btn" class="btn primary" disabled>Continue</button>
             </div>
+
+            <div class="intro-box">
+                <h2>Theme</h2>
+                <div class="theme-selector">
+                    <button class="theme-btn active" data-theme="dark">Dark</button>
+                    <button class="theme-btn" data-theme="light">Light</button>
+                    <button class="theme-btn" data-theme="midnight">Midnight</button>
+                    <button class="theme-btn" data-theme="forest">Forest</button>
+                    <button class="theme-btn" data-theme="ocean">Ocean</button>
+                    <button class="theme-btn" data-theme="sepia">Sepia</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Lobby Browser Screen -->
+        <div id="lobby-browser-screen" class="screen hidden">
+            <h1>Game Lobbies</h1>
+
+            <div class="panel">
+                <div class="panel-header">Create Lobby</div>
+                <div class="panel-body">
+                    <div class="form-row">
+                        <input type="text" id="lobby-name-input" placeholder="Lobby name" maxlength="30">
+                    </div>
+                    <div class="form-row">
+                        <input type="password" id="lobby-password-input" placeholder="Password (optional)" maxlength="50">
+                    </div>
+                    <div class="form-row">
+                        <label>Decks:</label>
+                        <select id="lobby-decks-select">
+                            <option value="1">1 Deck</option>
+                            <option value="2">2 Decks</option>
+                            <option value="3">3 Decks</option>
+                        </select>
+                        <label>Max Players:</label>
+                        <select id="lobby-max-players-select">
+                            <option value="4">4</option>
+                            <option value="6">6</option>
+                            <option value="8" selected>8</option>
+                            <option value="10">10</option>
+                        </select>
+                    </div>
+                    <button id="create-lobby-btn" class="btn primary">Create</button>
+                </div>
+            </div>
+
+            <div id="lobby-list" class="lobby-list">
+                <div class="no-lobbies">Loading...</div>
+            </div>
+
+            <div style="text-align: center; margin-top: 10px;">
+                <button id="refresh-lobbies-btn" class="btn">Refresh</button>
+            </div>
+        </div>
+
+        <!-- Join Lobby Modal -->
+        <div id="join-lobby-modal" class="modal hidden">
+            <div class="modal-content">
+                <h3>Join: <span id="join-lobby-name"></span></h3>
+                <p id="join-password-prompt">Enter password (if required)</p>
+                <input type="password" id="join-password-input" placeholder="Password" maxlength="50">
+                <div class="modal-actions">
+                    <button id="confirm-join-btn" class="btn primary">Join</button>
+                    <button onclick="closeJoinModal()" class="btn">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Connection Screen (legacy) -->
+        <div id="connect-screen" class="screen hidden">
+            <h1>Mao Card Game</h1>
+            <input type="text" id="player-name-legacy" placeholder="Enter your name" maxlength="20">
+            <button id="connect-btn" class="btn primary">Join</button>
             <div id="connection-status" class="status"></div>
         </div>
 

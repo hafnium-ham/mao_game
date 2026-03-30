@@ -1,57 +1,44 @@
-# Mao Card Game Makefile - Fixed for local directory execution
+.PHONY: help install server web client test clean
 
-.PHONY: help server client web test clean
+# Get the directory where this Makefile is located
+MAKEFILE_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
+VENV_PYTHON := $(MAKEFILE_DIR)venv/bin/python
 
-# Default target
+# Use venv python if available, otherwise system python3
+PYTHON := $(shell if [ -x "$(VENV_PYTHON)" ]; then echo "$(VENV_PYTHON)"; else echo python3; fi)
+
 help:
-	@echo "Mao Card Game - Available Commands:"
+	@echo "Mao Card Game"
 	@echo ""
-	@echo "  make server       Start the CLI game server"
-	@echo "  make web          Start the web server (browser clients)"
-	@echo "  make client       Start a CLI client"
-	@echo "  make test         Run all unit tests"
+	@echo "  make install   Install dependencies"
+	@echo "  make web       Start web server (default port 8080)"
+	@echo "  make server    Start CLI server"
+	@echo "  make client    Start CLI client"
+	@echo "  make test      Run tests"
+	@echo "  make clean     Clean build artifacts"
 	@echo ""
-	@echo "Web Server Options:"
-	@echo "  PORT=8080         Set the port (default 8080)"
-	@echo ""
-	@echo "CLI Connection Options:"
-	@echo "  HOST=172.24.33.100  Set the IP of the server"
-	@echo "  NAME=YourName       Set your player name"
-	@echo "  PORT=5555           Set the port (default 5555)"
-	@echo ""
-	@echo "Example:"
-	@echo "  make web PORT=8080"
+	@echo "Options:"
+	@echo "  PORT=8080      Set port"
+	@echo "  HOST=localhost Set host for client"
+	@echo "  NAME=Player    Set player name"
 
-# Start the CLI server
-server:
-	@echo "Starting Mao CLI server..."
-	@echo "----------------------------------------------------------------"
-	@echo "YOUR IP ADDRESS: $$(ifconfig | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $$2}' | head -n 1)"
-	@echo "Give the IP above to your friends so they can join!"
-	@echo "----------------------------------------------------------------"
-	PYTHONPATH=.. python3 main.py server --port $(or $(PORT), 5555) --decks $(or $(DECKS), 1) --max-players $(or $(PLAYERS), 10)
+install:
+	$(PYTHON) -m pip install -r requirements.txt
 
-# Start the web server for browser clients
 web:
-	@echo "Starting Mao web server..."
-	@echo "----------------------------------------------------------------"
-	@echo "Open http://localhost:$(or $(PORT), 8080) in your browser"
-	@echo "----------------------------------------------------------------"
-	PYTHONPATH=.. python3 main.py server --web --port $(or $(PORT), 8080)
+	cd .. && $(PYTHON) -m mao_game server --web --port $(or $(PORT), 8080)
 
-# Start a CLI client
+server:
+	cd .. && $(PYTHON) -m mao_game server --port $(or $(PORT), 5555)
+
 client:
-	@echo "Connecting to $(or $(HOST), localhost):$(or $(PORT), 5555)..."
-	PYTHONPATH=.. python3 main.py client --host $(or $(HOST), localhost) --port $(or $(PORT), 5555) --name "$(or $(NAME), Player)"
+	cd .. && $(PYTHON) -m mao_game client --host $(or $(HOST), localhost) --port $(or $(PORT), 5555) --name "$(or $(NAME), Player)"
 
-# Run tests
 test:
-	@echo "Running tests..."
-	PYTHONPATH=.. python3 -m unittest discover -s tests -v
+	cd .. && $(PYTHON) -m pytest mao_game/tests/ -v
 
-# Clean up
 clean:
-	@echo "Cleaning up..."
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-	find . -type f -name "*.pyc" -delete 2>/dev/null || true
-	@echo "Done!"
+	find . -name ".DS_Store" -delete 2>/dev/null || true
+	rm -rf .pytest_cache 2>/dev/null || true
+	@echo "Cleaned!"

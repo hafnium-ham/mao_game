@@ -179,13 +179,17 @@ class WebSocketGameServer:
         """Handle request to create a new lobby."""
         name = message.data.get("name", "Game")
         password = message.data.get("password", "")
+        num_decks = message.data.get("num_decks", 1)
+        max_players = message.data.get("max_players", 10)
         player_name = self.clients.get(player_id, {}).get('name', f'Player_{player_id[:4]}')
 
         lobby = self.lobby_manager.create_lobby(
             name=name,
             password=password,
             host_id=player_id,
-            host_name=player_name
+            host_name=player_name,
+            max_players=max_players,
+            num_decks=num_decks
         )
 
         if lobby:
@@ -194,13 +198,13 @@ class WebSocketGameServer:
             self.player_lobbies[player_id] = lobby.code
 
             # Create game and add player
-            lobby.game = Game(num_decks=self.num_decks)
+            lobby.game = Game(num_decks=num_decks)
             player = Player(id=player_id, name=player_name)
             lobby.game.add_player(player)
 
             await self._send_message(player_id, Message(
                 type=MessageType.LOBBY_CREATED,
-                data={"code": lobby.code, "name": lobby.name}
+                data={"code": lobby.code, "name": lobby.name, "max_players": max_players, "num_decks": num_decks}
             ))
 
             # Broadcast game state to lobby
@@ -227,9 +231,9 @@ class WebSocketGameServer:
         if lobby:
             self.player_lobbies[player_id] = lobby.code
 
-            # Create game if needed
+            # Create game if needed using lobby's deck count
             if not lobby.game:
-                lobby.game = Game(num_decks=self.num_decks)
+                lobby.game = Game(num_decks=lobby.num_decks)
 
             # Add player to lobby's game
             player = Player(id=player_id, name=player_name)
@@ -237,7 +241,13 @@ class WebSocketGameServer:
 
             await self._send_message(player_id, Message(
                 type=MessageType.LOBBY_JOINED,
-                data={"code": lobby.code, "name": lobby.name, "player_count": len(lobby.clients)}
+                data={
+                    "code": lobby.code,
+                    "name": lobby.name,
+                    "player_count": len(lobby.clients),
+                    "max_players": lobby.max_players,
+                    "num_decks": lobby.num_decks
+                }
             ))
 
             # Notify others in lobby

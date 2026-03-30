@@ -26,6 +26,8 @@ class Lobby:
     password_hash: str
     host_id: str
     host_name: str
+    max_players: int = 10
+    num_decks: int = 1
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     game: Optional[object] = None  # Will be Game instance
     clients: Dict[str, dict] = field(default_factory=dict)  # player_id -> {ws, name}
@@ -38,6 +40,9 @@ class Lobby:
             "name": self.name,
             "host_name": self.host_name,
             "player_count": len(self.clients),
+            "max_players": self.max_players,
+            "num_decks": self.num_decks,
+            "has_password": bool(self.password_hash),
             "phase": self.phase,
             "created_at": self.created_at
         }
@@ -72,6 +77,8 @@ class LobbyManager:
                             password_hash=lobby_data["password_hash"],
                             host_id=lobby_data["host_id"],
                             host_name=lobby_data["host_name"],
+                            max_players=lobby_data.get("max_players", 10),
+                            num_decks=lobby_data.get("num_decks", 1),
                             created_at=lobby_data.get("created_at", datetime.now().isoformat())
                         )
             except (json.JSONDecodeError, KeyError) as e:
@@ -87,6 +94,8 @@ class LobbyManager:
                     "password_hash": lobby.password_hash,
                     "host_id": lobby.host_id,
                     "host_name": lobby.host_name,
+                    "max_players": lobby.max_players,
+                    "num_decks": lobby.num_decks,
                     "created_at": lobby.created_at
                 }
                 for code, lobby in self.lobbies.items()
@@ -125,7 +134,8 @@ class LobbyManager:
             code = ''.join(random.choice(chars) for _ in range(length))
         return code
 
-    def create_lobby(self, name: str, password: str, host_id: str, host_name: str) -> Optional[Lobby]:
+    def create_lobby(self, name: str, password: str, host_id: str, host_name: str,
+                      max_players: int = 10, num_decks: int = 1) -> Optional[Lobby]:
         """Create a new lobby. Password is optional - empty string means no password."""
         if len(self.lobbies) >= MAX_LOBBIES:
             return None
@@ -139,7 +149,9 @@ class LobbyManager:
             name=name,
             password_hash=password_hash,
             host_id=host_id,
-            host_name=host_name
+            host_name=host_name,
+            max_players=max_players,
+            num_decks=num_decks
         )
         self.lobbies[code] = lobby
         self._save_lobbies()
@@ -165,6 +177,10 @@ class LobbyManager:
         if lobby.password_hash:
             if not self._verify_password(password, lobby.password_hash):
                 return None, "Incorrect password"
+
+        # Check if lobby is full
+        if len(lobby.clients) >= lobby.max_players:
+            return None, f"Lobby is full (max {lobby.max_players} players)"
 
         lobby.clients[player_id] = {"ws": ws, "name": player_name}
         return lobby, None

@@ -1,6 +1,45 @@
 // Mao Card Game - WebSocket Client
 
-let ws = null;
+// Card suit symbols
+const SUIT_SYMBOLS = {
+    'hearts': '♥',
+    'diamonds': '♦',
+    'clubs': '♣',
+    'spades': '♠',
+    'h': '♥',
+    'd': '♦',
+    'c': '♣',
+    's': '♠'
+};
+
+// CSS class constants
+const HIDDEN_CLASS = 'hidden';
+
+// Helper: Extract field from message data (handles both direct and nested formats)
+function extractField(data, field, defaultValue = null) {
+    return data[field] ?? data.data?.[field] ?? defaultValue;
+}
+
+// Helper: Show/hide modals
+function showModal(modalId) {
+    const el = document.getElementById(modalId);
+    if (el) el.classList.remove(HIDDEN_CLASS);
+}
+
+function hideModal(modalId) {
+    const el = document.getElementById(modalId);
+    if (el) el.classList.add(HIDDEN_CLASS);
+}
+
+// Cached DOM elements for performance
+const DOM = {};
+function cacheDom() {
+    DOM.chatMessages = document.getElementById('chat-messages');
+    DOM.stackCards = document.getElementById('stack-cards');
+    DOM.recentCards = document.getElementById('recent-cards');
+    DOM.notifications = document.getElementById('notifications');
+    DOM.myHand = document.getElementById('my-hand');
+}
 let playerId = null;
 let playerName = null;
 let gameState = null;
@@ -23,14 +62,8 @@ let penaltyReasons = JSON.parse(localStorage.getItem('mao_penaltyReasons')) || [
 // Theme management
 function setTheme(theme) {
     currentTheme = theme;
-    // Simple light/dark toggle
-    if (theme === 'light') {
-        document.body.style.background = '#f5f5f5';
-        document.body.style.color = '#333';
-    } else {
-        document.body.style.background = '';
-        document.body.style.color = '';
-    }
+    // Remove all theme classes and add the new one
+    document.body.className = theme === 'dark' ? '' : `theme-${theme}`;
     localStorage.setItem('mao_theme', theme);
 
     // Update active button
@@ -76,7 +109,87 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Populate penalty reasons
     updatePenaltyReasonsSelect();
+
+    // Initialize draggable chat
+    initDraggableChat();
 });
+
+// Draggable chat panel with edge snapping
+function initDraggableChat() {
+    const panel = document.getElementById('chat-panel');
+    const header = document.getElementById('chat-drag-handle');
+    if (!panel || !header) return;
+
+    let dragging = false;
+    let offset = { x: 0, y: 0 };
+
+    // Load saved position
+    const savedPos = JSON.parse(localStorage.getItem('mao_chatPos') || '{}');
+    if (savedPos.left !== undefined) {
+        panel.style.left = savedPos.left + 'px';
+        panel.style.top = savedPos.top + 'px';
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+    }
+
+    header.addEventListener('mousedown', (e) => {
+        // Only start drag on left click, not on toggle click
+        if (e.button !== 0) return;
+        dragging = true;
+        const rect = panel.getBoundingClientRect();
+        offset.x = e.clientX - rect.left;
+        offset.y = e.clientY - rect.top;
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!dragging) return;
+
+        let x = e.clientX - offset.x;
+        let y = e.clientY - offset.y;
+
+        // Edge snapping threshold
+        const snapThreshold = 20;
+
+        // Snap to left edge
+        if (x < snapThreshold) x = 10;
+        // Snap to top edge
+        if (y < snapThreshold) y = 10;
+        // Snap to right edge
+        if (x + panel.offsetWidth > window.innerWidth - snapThreshold) {
+            x = window.innerWidth - panel.offsetWidth - 10;
+        }
+        // Snap to bottom edge
+        if (y + panel.offsetHeight > window.innerHeight - snapThreshold) {
+            y = window.innerHeight - panel.offsetHeight - 10;
+        }
+
+        panel.style.left = x + 'px';
+        panel.style.top = y + 'px';
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+    });
+
+    document.addEventListener('mouseup', (e) => {
+        if (dragging) {
+            dragging = false;
+            // Save position
+            localStorage.setItem('mao_chatPos', JSON.stringify({
+                left: parseInt(panel.style.left) || 10,
+                top: parseInt(panel.style.top) || 140
+            }));
+        }
+    });
+
+    // Toggle chat on header click (but not during drag)
+    let clickStart = 0;
+    header.addEventListener('click', (e) => {
+        if (Date.now() - clickStart < 200) {
+            toggleChat();
+        }
+    });
+    header.addEventListener('mousedown', () => clickStart = Date.now());
+}
 
 // Intro screen flow
 function handleIntroContinue() {
@@ -161,7 +274,9 @@ const messageHandlers = {
     'point_of_order': handlePointOfOrder,
     'game_over': handleGameOver,
     'error': handleError,
-    'success': handleSuccess
+    'success': handleSuccess,
+    'mao_declared': handleMaoDeclared,
+    'game_log': handleGameLog
 };
 
 // Message Handlers
@@ -180,16 +295,34 @@ function handleLobbyList(data) {
 function handleLobbyCreated(data) {
     const code = data.code || data.data?.code;
     const name = data.name || data.data?.name;
+    const maxPlayers = data.max_players || data.data?.max_players || 10;
+    const numDecks = data.num_decks || data.data?.num_decks || 1;
     currentLobbyCode = code;
+
+    // Update lobby display
+    const maxPlayersEl = document.getElementById('max-players');
+    const deckCountEl = document.getElementById('deck-count');
+    if (maxPlayersEl) maxPlayersEl.textContent = maxPlayers;
+    if (deckCountEl) deckCountEl.textContent = numDecks;
+
     showStatus(`Lobby "${name}" created! Code: ${code}`, 'success');
-    // Auto-join the lobby
-    sendMessage({ type: 'join_game' });
+    // Auto-join the lobby (already done on server side)
+    showScreen('lobby');
 }
 
 function handleLobbyJoined(data) {
     const code = data.code || data.data?.code;
     const name = data.name || data.data?.name;
+    const maxPlayers = data.max_players || data.data?.max_players || 10;
+    const numDecks = data.num_decks || data.data?.num_decks || 1;
     currentLobbyCode = code;
+
+    // Update lobby display
+    const maxPlayersEl = document.getElementById('max-players');
+    const deckCountEl = document.getElementById('deck-count');
+    if (maxPlayersEl) maxPlayersEl.textContent = maxPlayers;
+    if (deckCountEl) deckCountEl.textContent = numDecks;
+
     showStatus(`Joined lobby "${name}"`, 'success');
     showScreen('lobby');
 }
@@ -207,17 +340,22 @@ function requestLobbyList() {
 function createLobby() {
     const nameInput = document.getElementById('lobby-name-input');
     const passwordInput = document.getElementById('lobby-password-input');
-    const name = nameInput.value.trim() || 'Game';
-    const password = passwordInput.value.trim();
+    const decksSelect = document.getElementById('lobby-decks-select');
+    const maxPlayersSelect = document.getElementById('lobby-max-players-select');
 
-    if (!password) {
-        showStatus('Please enter a password for your lobby', 'error');
-        return;
-    }
+    const name = nameInput.value.trim() || 'Game';
+    const password = passwordInput.value.trim(); // Optional - empty string means no password
+    const numDecks = parseInt(decksSelect?.value) || 1;
+    const maxPlayers = parseInt(maxPlayersSelect?.value) || 10;
 
     sendMessage({
         type: 'create_lobby',
-        data: { name, password }
+        data: {
+            name,
+            password,  // Can be empty string for no password
+            num_decks: numDecks,
+            max_players: maxPlayers
+        }
     });
 }
 
@@ -227,11 +365,7 @@ function confirmJoinLobby() {
     const passwordInput = document.getElementById('join-password-input');
     const password = passwordInput.value.trim();
 
-    if (!password) {
-        showStatus('Please enter the password', 'error');
-        return;
-    }
-
+    // Password only required for password-protected lobbies
     sendMessage({
         type: 'join_lobby',
         data: { code: selectedLobbyCode, password }
@@ -242,8 +376,25 @@ function confirmJoinLobby() {
 
 function showJoinModal(lobbyCode, lobbyName) {
     selectedLobbyCode = lobbyCode;
+    const hasPassword = lobbyPasswordMap[lobbyCode];
+
     document.getElementById('join-lobby-name').textContent = lobbyName;
     document.getElementById('join-password-input').value = '';
+
+    // Show/hide password prompt based on whether lobby has password
+    const passwordPrompt = document.getElementById('join-password-prompt');
+    const passwordInput = document.getElementById('join-password-input');
+
+    if (hasPassword) {
+        passwordPrompt.textContent = 'Enter password';
+        passwordInput.placeholder = 'Password required';
+        passwordInput.required = true;
+    } else {
+        passwordPrompt.textContent = 'No password required';
+        passwordInput.placeholder = 'Password (optional)';
+        passwordInput.required = false;
+    }
+
     document.getElementById('join-lobby-modal').classList.remove('hidden');
 }
 
@@ -251,6 +402,9 @@ function closeJoinModal() {
     document.getElementById('join-lobby-modal').classList.add('hidden');
     selectedLobbyCode = null;
 }
+
+// Track which lobbies have passwords
+let lobbyPasswordMap = {};
 
 function renderLobbyList(lobbies) {
     const container = document.getElementById('lobby-list');
@@ -260,9 +414,15 @@ function renderLobbyList(lobbies) {
         return;
     }
 
+    // Store password info for each lobby
+    lobbyPasswordMap = {};
+    lobbies.forEach(lobby => {
+        lobbyPasswordMap[lobby.code] = lobby.has_password;
+    });
+
     container.innerHTML = lobbies.map(lobby => `
         <div class="lobby-card" onclick="showJoinModal('${lobby.code}', '${lobby.name}')">
-            <h3>${lobby.name}</h3>
+            <h3>${lobby.name} ${lobby.has_password ? '🔒' : ''}</h3>
             <div class="lobby-info">
                 <span>Players: ${lobby.player_count}/${lobby.max_players || 10}</span>
                 <span>Code: ${lobby.code}</span>
@@ -289,6 +449,15 @@ function handlePlayerList(data) {
 function handleGameState(data) {
     gameState = data.data || data;
     console.log('Game state:', gameState);
+
+    // Extract my hand from players list if present
+    if (gameState.players && playerId) {
+        const myPlayer = gameState.players.find(p => p.id === playerId);
+        if (myPlayer && myPlayer.hand) {
+            myHand = myPlayer.hand;
+            renderHand();
+        }
+    }
 
     // Update UI based on game phase
     if (gameState.phase === 'waiting') {
@@ -441,10 +610,12 @@ function getPlayerPositions(count) {
 function updateDiscardPile() {
     const topCardDiv = document.getElementById('top-card');
 
-    // Try recent_cards first, then top_card
+    // recent_cards format: [{player_name, card}, ...]
     let topCard = null;
     if (gameState.recent_cards && gameState.recent_cards.length > 0) {
-        topCard = gameState.recent_cards[gameState.recent_cards.length - 1];
+        // Get the last card object
+        const lastPlay = gameState.recent_cards[gameState.recent_cards.length - 1];
+        topCard = lastPlay.card || lastPlay;  // Handle both formats
     } else if (gameState.top_card) {
         topCard = gameState.top_card;
     }
@@ -459,7 +630,9 @@ function updateDiscardPile() {
 
 function updateRecentCards() {
     const container = document.getElementById('recent-cards');
+    const sidebarContainer = document.getElementById('stack-cards');
     container.innerHTML = '';
+    if (sidebarContainer) sidebarContainer.innerHTML = '';
 
     if (!gameState.recent_cards || gameState.recent_cards.length <= 1) {
         container.style.display = 'none';
@@ -468,14 +641,27 @@ function updateRecentCards() {
 
     container.style.display = 'flex';
 
-    // Show last 3 plays (excluding current top card)
-    const recent = gameState.recent_cards.slice(0, -1).slice(-3).reverse();
-    recent.forEach(card => {
+    // Show last 5 plays (excluding current top card) - newest first
+    const recent = gameState.recent_cards.slice(0, -1).slice(-5).reverse();
+    recent.forEach(play => {
+        const card = play.card || play;
+        const playerName = play.player_name || '';
+        const suit = SUIT_SYMBOLS[card.suit?.toLowerCase()] || card.suit || '';
+
+        // Add to inline recent cards
         const div = document.createElement('div');
         div.className = 'recent-card';
-        const suit = SUIT_SYMBOLS[card.suit.toLowerCase()] || card.suit;
         div.textContent = `${card.rank}${suit}`;
+        div.title = playerName ? `${playerName} played` : '';
         container.appendChild(div);
+
+        // Add to sidebar
+        if (sidebarContainer) {
+            const sidebarDiv = document.createElement('div');
+            sidebarDiv.className = 'stack-card';
+            sidebarDiv.innerHTML = `<span class="stack-rank">${card.rank}</span><span class="stack-suit">${suit}</span>`;
+            sidebarContainer.appendChild(sidebarDiv);
+        }
     });
 }
 
@@ -576,17 +762,86 @@ function handleNotification(data) {
     }
 
     showNotification(message, eventType);
+    addChatMessage(message, eventType);  // Also add to chat history
+}
+
+// Chat history storage
+let chatMessages = [];
+const MAX_CHAT_MESSAGES = 100;
+
+function toggleChat() {
+    const messages = document.getElementById('chat-messages');
+    const toggle = document.getElementById('chat-toggle');
+    if (messages.style.display === 'none') {
+        messages.style.display = 'block';
+        toggle.textContent = '▼';
+    } else {
+        messages.style.display = 'none';
+        toggle.textContent = '▶';
+    }
+}
+
+function addChatMessage(message, type = 'default') {
+    // Store in history
+    chatMessages.push({ message: message, type: type, time: new Date() });
+    if (chatMessages.length > MAX_CHAT_MESSAGES) {
+        chatMessages.shift();
+    }
+
+    // Add to chat panel
+    const container = document.getElementById('chat-messages');
+    if (!container) return;
+
+    const div = document.createElement('div');
+    div.className = `chat-message ${type}`;
+    div.textContent = message;
+    container.appendChild(div);
+
+    // Scroll to bottom
+    container.scrollTop = container.scrollHeight;
+}
+
+function sendChatMessage() {
+    const input = document.getElementById('chat-input');
+    const message = input.value.trim();
+    if (!message) return;
+
+    // Check for POO commands
+    const lowerMessage = message.toLowerCase();
+
+    if (lowerMessage.includes('point of order') && lowerMessage.includes('end')) {
+        sendMessage({ type: 'end_point_of_order' });
+    } else if (lowerMessage.includes('point of order')) {
+        sendMessage({
+            type: 'point_of_order',
+            data: { reason: message }
+        });
+    } else {
+        sendMessage({
+            type: 'chat',
+            data: { message: message }
+        });
+    }
+
+    input.value = '';
 }
 
 function handlePointOfOrder(data) {
     pooActive = true;
     document.body.classList.add('poo-active');
     document.getElementById('poo-indicator').classList.remove('hidden');
+    document.getElementById('view-hand-btn').classList.remove('hidden');
 
     const reason = data.reason || data.data?.reason || 'No reason given';
     const caller = data.caller_name || data.data?.caller_name || 'Someone';
     document.getElementById('poo-reason').textContent = reason;
     document.getElementById('poo-caller').textContent = caller;
+
+    // Update the POO indicator banner text
+    const reasonText = document.getElementById('poo-reason-text');
+    if (reasonText) {
+        reasonText.textContent = ` - ${caller}: ${reason}`;
+    }
 
     // Show POO modal with penalty history
     const pooModal = document.getElementById('poo-modal');
@@ -669,6 +924,19 @@ function playCard(card) {
     });
 }
 
+// Command menu toggle
+function toggleCommandMenu() {
+    const list = document.getElementById('command-list');
+    const toggle = document.getElementById('command-toggle');
+    if (list.classList.contains('show')) {
+        list.classList.remove('show');
+        toggle.textContent = '▼';
+    } else {
+        list.classList.add('show');
+        toggle.textContent = '▲';
+    }
+}
+
 function drawCard() {
     if (!gameState) {
         showNotification('Game not started', 'error');
@@ -724,6 +992,32 @@ function declareMao() {
     if (confirm('Declare Mao? This ends the game if unchallenged for 6 seconds.')) {
         sendMessage({ type: 'declare_mao' });
     }
+}
+
+function challengeMao() {
+    if (!gameState || gameState.mao_declaring_player_id === playerId) {
+        showNotification("You can't challenge your own Mao!", 'error');
+        return;
+    }
+    sendMessage({ type: 'cancel_mao' });
+    document.getElementById('mao-challenge').classList.add('hidden');
+}
+
+function handleMaoDeclared(data) {
+    const declarerName = data.declarer_name || data.data?.declarer_name || 'Someone';
+    const declarerId = data.declarer_id || data.data?.declarer_id;
+
+    // Don't show challenge banner to the declarer
+    if (declarerId === playerId) return;
+
+    document.getElementById('mao-declarer').textContent = declarerName;
+    const banner = document.getElementById('mao-challenge');
+    banner.classList.remove('hidden');
+
+    // Auto-hide after 6 seconds
+    setTimeout(() => {
+        banner.classList.add('hidden');
+    }, 6000);
 }
 
 function startGame() {
@@ -808,7 +1102,36 @@ function throwCard(card) {
 }
 
 function showPenaltyDialog() {
-    showPenaltyDialogForPlayer();
+    if (!gameState || !gameState.players || gameState.players.length < 2) {
+        showNotification('Need at least 2 players for penalties', 'error');
+        return;
+    }
+
+    // Show modal with player list for selection
+    const modal = document.getElementById('player-select-modal');
+    const list = document.getElementById('player-select-list');
+
+    const otherPlayers = gameState.players.filter(p => p.id !== playerId);
+    list.innerHTML = otherPlayers.map(p => `
+        <div class="player-select-item" onclick="selectPlayerForPenalty('${p.id}', '${p.name}')">
+            <span class="player-name">${p.name}</span>
+            <span class="player-cards">${p.card_count || 0} cards</span>
+        </div>
+    `).join('');
+
+    modal.classList.remove('hidden');
+}
+
+function closePlayerSelectModal() {
+    document.getElementById('player-select-modal').classList.add('hidden');
+}
+
+function selectPlayerForPenalty(id, name) {
+    selectedPlayerId = id;
+    document.getElementById('player-select-modal').classList.add('hidden');
+    document.getElementById('penalty-target').textContent = name;
+    updatePenaltyReasonsSelect();
+    document.getElementById('penalty-modal').classList.remove('hidden');
 }
 
 function showPenaltyDialogForPlayer() {
@@ -878,12 +1201,57 @@ function viewMyHand() {
     showNotification('Viewing your hand...', 'poo_action');
 }
 
+function toggleViewHand() {
+    if (viewingHand) {
+        // Already viewing, so hide
+        viewingHand = false;
+        document.getElementById('my-hand').style.display = 'none';
+    } else {
+        // Show hand
+        viewingHand = true;
+        document.getElementById('my-hand').style.display = 'flex';
+        sendMessage({ type: 'view_hand' });
+    }
+}
+
 function shuffleDeck() {
     sendMessage({ type: 'shuffle_cards' });
 }
 
 function endPoo() {
     sendMessage({ type: 'end_point_of_order' });
+}
+
+function showGameLog() {
+    // Request game log from server
+    sendMessage({ type: 'get_game_log' });
+    // The server will send back the log, which we'll display
+    document.getElementById('game-log-modal').classList.remove('hidden');
+}
+
+function closeGameLog() {
+    document.getElementById('game-log-modal').classList.add('hidden');
+}
+
+function handleGameLog(data) {
+    const logs = data.logs || data.data?.logs || [];
+    const container = document.getElementById('game-log-content');
+    container.innerHTML = '';
+
+    if (logs.length === 0) {
+        container.innerHTML = '<p>No events recorded yet.</p>';
+        return;
+    }
+
+    logs.forEach(log => {
+        const div = document.createElement('div');
+        div.className = `log-entry log-${log.event_type}`;
+        const time = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '';
+        div.innerHTML = `<span class="log-time">${time}</span> <span class="log-player">${log.player_name || 'System'}</span>: ${log.details}`;
+        container.appendChild(div);
+    });
+
+    container.scrollTop = container.scrollHeight;
 }
 
 function voteOnPenalty(index) {
@@ -973,6 +1341,7 @@ function showNotification(message, type = 'default') {
 
 // Keyboard shortcuts - only work when game is in progress
 document.addEventListener('keydown', (e) => {
+    // Don't trigger shortcuts when typing in inputs
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
     // Only allow shortcuts when game is active
@@ -982,15 +1351,19 @@ document.addEventListener('keydown', (e) => {
 
     switch (e.key.toLowerCase()) {
         case 'd':
+            e.preventDefault();
             drawCard();
             break;
         case 'k':
+            e.preventDefault();
             sendKnock();
             break;
         case 'm':
+            e.preventDefault();
             declareMao();
             break;
         case 's':
+            e.preventDefault();
             showSayDialog();
             break;
     }
@@ -1005,6 +1378,19 @@ document.querySelectorAll('.modal').forEach(modal => {
     });
 });
 
+// Chat input enter key handler
+document.addEventListener('DOMContentLoaded', () => {
+    const chatInput = document.getElementById('chat-input');
+    if (chatInput) {
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                sendChatMessage();
+            }
+        });
+    }
+});
+
 // Make functions globally available
 window.connect = connect;
 window.drawCard = drawCard;
@@ -1013,6 +1399,7 @@ window.showSayDialog = showSayDialog;
 window.closeSayModal = closeSayModal;
 window.sendSay = sendSay;
 window.declareMao = declareMao;
+window.challengeMao = challengeMao;
 window.startGame = startGame;
 window.leaveGame = leaveGame;
 window.showPlayerActions = showPlayerActions;
@@ -1034,3 +1421,17 @@ window.closeSettingsModal = closeSettingsModal;
 window.addPenaltyReason = addPenaltyReason;
 window.removePenaltyReason = removePenaltyReason;
 window.playCard = playCard;
+window.toggleViewHand = toggleViewHand;
+window.closeJoinModal = closeJoinModal;
+window.confirmJoinLobby = confirmJoinLobby;
+window.showJoinModal = showJoinModal;
+window.createLobby = createLobby;
+window.requestLobbyList = requestLobbyList;
+window.leaveLobby = leaveLobby;
+window.toggleCommandMenu = toggleCommandMenu;
+window.toggleChat = toggleChat;
+window.sendChatMessage = sendChatMessage;
+window.closePlayerSelectModal = closePlayerSelectModal;
+window.selectPlayerForPenalty = selectPlayerForPenalty;
+window.showGameLog = showGameLog;
+window.closeGameLog = closeGameLog;

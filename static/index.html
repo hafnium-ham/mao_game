@@ -110,6 +110,32 @@
 
         <!-- Game Screen -->
         <div id="game-screen" class="screen hidden">
+            <!-- Settings FAB (top right) -->
+            <div class="settings-fab" onclick="showSettingsModal()" title="Settings">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+            </div>
+            <!-- Chat Panel (left side) -->
+            <div id="chat-panel" class="chat-panel">
+                <div class="chat-header" id="chat-drag-handle">
+                    <span>Chat</span>
+                    <span id="chat-toggle">▼</span>
+                </div>
+                <div id="chat-messages" class="chat-messages"></div>
+                <div class="chat-input-row">
+                    <input type="text" id="chat-input" placeholder="Type message..." autocomplete="off">
+                    <button onclick="sendChatMessage()">Send</button>
+                </div>
+            </div>
+
+            <!-- Played Cards Stack (right side) -->
+            <div id="played-stack" class="played-stack">
+                <div class="stack-header">🎴 Played</div>
+                <div id="stack-cards" class="stack-cards"></div>
+            </div>
+
             <!-- Players arranged around the center (UNO-style) -->
             <div id="game-container">
                 <!-- Player positions will be dynamically generated -->
@@ -147,6 +173,28 @@
                 <button id="view-hand-btn" class="hidden" onclick="toggleViewHand()">👁️ View Hand</button>
             </div>
 
+            <!-- Command reference -->
+            <div id="command-menu" class="command-menu">
+                <div class="command-header" onclick="toggleCommandMenu()">
+                    <span>⌨️ Commands</span>
+                    <span id="command-toggle">▼</span>
+                </div>
+                <div id="command-list" class="command-list">
+                    <div class="command-item"><kbd>D</kbd> Draw card</div>
+                    <div class="command-item"><kbd>K</kbd> Knock</div>
+                    <div class="command-item"><kbd>M</kbd> Declare Mao</div>
+                    <div class="command-item"><kbd>S</kbd> Say something</div>
+                    <div class="command-item"><span>Click card</span> Play card</div>
+                    <div class="command-item"><span>Click player</span> Actions menu</div>
+                </div>
+            </div>
+
+            <!-- Mao Challenge Banner -->
+            <div id="mao-challenge" class="mao-challenge hidden">
+                <span id="mao-declarer"></span> declared Mao!
+                <button onclick="challengeMao()">Challenge!</button>
+            </div>
+
             <!-- Notifications/Log -->
             <div id="notifications" class="notifications"></div>
 
@@ -179,6 +227,17 @@
                 <div id="throw-hand" class="hand throw-hand"></div>
                 <div class="modal-actions">
                     <button onclick="closeThrowModal()">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Player Select Modal for Penalties -->
+        <div id="player-select-modal" class="modal hidden">
+            <div class="modal-content">
+                <h3>Select Player for Penalty</h3>
+                <div id="player-select-list" class="player-select-list"></div>
+                <div class="modal-actions">
+                    <button onclick="closePlayerSelectModal()">Cancel</button>
                 </div>
             </div>
         </div>
@@ -237,8 +296,9 @@
                 </div>
                 <div class="poo-actions">
                     <button onclick="viewMyHand()">👁️ View My Hand</button>
-                    <button onclick="shuffleDeck()">🔀 Shuffle Discard into Deck</button>
-                    <button onclick="endPoo()">End Point of Order</button>
+                    <button onclick="shuffleDeck()">🔀 Shuffle Discard</button>
+                    <button onclick="showGameLog()">📜 View Game Log</button>
+                    <button onclick="endPoo()">✓ End Point of Order</button>
                 </div>
                 <div id="poo-penalty-history" class="penalty-history">
                     <h4>Penalty History</h4>
@@ -246,6 +306,17 @@
                 </div>
                 <div id="poo-viewing-hands" class="viewing-hands">
                     <!-- Players viewing their hands shown here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Game Log Modal -->
+        <div id="game-log-modal" class="modal hidden">
+            <div class="modal-content">
+                <h3>📜 Game Log</h3>
+                <div id="game-log-content" class="game-log-content"></div>
+                <div class="modal-actions">
+                    <button onclick="closeGameLog()">Close</button>
                 </div>
             </div>
         </div>

@@ -14,6 +14,14 @@ class MessageType(Enum):
     CONNECT = "connect"           # Client connecting
     DISCONNECT = "disconnect"     # Client disconnecting
     PLAYER_LIST = "player_list"   # List of connected players
+    UPDATE_AVATAR = "update_avatar"  # Update player avatar
+    AVATAR_UPDATE = "avatar_update"  # Broadcast avatar update
+
+    # Authentication
+    LOGIN = "login"               # Login request
+    REGISTER = "register"         # Register new account
+    LOGIN_SUCCESS = "login_success"  # Login successful
+    LOGOUT = "logout"             # Logout request
 
     # Lobby management
     LIST_LOBBIES = "list_lobbies"       # Request list of lobbies
@@ -44,6 +52,7 @@ class MessageType(Enum):
     RETURN_CARD = "return_card"   # Return last played card
     DECLARE_MAO = "declare_mao"   # Declare Mao (victory)
     CANCEL_MAO = "cancel_mao"     # Cancel Mao declaration
+    MAO_DECLARED = "mao_declared" # Broadcast when someone declares Mao
 
     # Point of Order
     POINT_OF_ORDER = "point_of_order"        # Call Point of Order
@@ -196,6 +205,19 @@ class Protocol:
 def msg_connect(name: str) -> Message:
     """Create connection request message."""
     return Message(type=MessageType.CONNECT, data={"name": name})
+
+
+def msg_login(username: str, password: str) -> Message:
+    """Create login request message."""
+    return Message(type=MessageType.LOGIN, data={"username": username, "password": password})
+
+
+def msg_register(username: str, password: str, display_name: str = None) -> Message:
+    """Create register request message."""
+    data = {"username": username, "password": password}
+    if display_name:
+        data["display_name"] = display_name
+    return Message(type=MessageType.REGISTER, data=data)
 
 
 def msg_join_game() -> Message:

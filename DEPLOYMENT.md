@@ -1,207 +1,161 @@
 # Mao Game Deployment Guide
 
+## Quick Start
+
+```bash
+cd mao_game
+make install   # Install dependencies
+make web       # Start server on port 8080
+# Open http://localhost:8080
+```
+
+## Database
+
+**SQLite** - single file, no setup required.
+
+- Location: `config/mao_game.db` (created automatically)
+- Stores: User accounts, game history
+- Backup: Just copy the `.db` file
+
 ## Deployment Options
 
-### Option 1: Self-Hosted on Raspberry Pi (Recommended)
+### Option 1: Raspberry Pi + GitHub Pages (Recommended)
 
-This is the simplest approach - run the server directly on your Pi.
+Host the static files on GitHub Pages, run the WebSocket server on your Pi.
 
-**Steps:**
+**Architecture:**
+```
+[GitHub Pages]              [Raspberry Pi]
+  Static files      ←→      WebSocket Server
+  index.html                :8080
+  client.js                 mao_game.db
+  style.css
+```
+
+**Step 1: Deploy Static Files to GitHub Pages**
+
 ```bash
-# SSH into your Pi
+# In your repo, create a gh-pages branch with just static/
+git checkout -b gh-pages
+git rm -rf . (except static/)
+git mv static/* .
+git commit -m "Deploy to GitHub Pages"
+git push origin gh-pages
+
+# Enable GitHub Pages in repo settings → Source: gh-pages branch
+```
+
+**Step 2: Update WebSocket URL in client.js**
+
+```javascript
+// In client.js, find the connect() function and update:
+const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+const host = window.location.hostname === 'your-username.github.io'
+    ? 'your-pi-ip:8080'  // Your Pi's IP or Tailscale address
+    : window.location.host;
+const wsUrl = `${protocol}//${host}/ws`;
+```
+
+**Step 3: Run Server on Raspberry Pi**
+
+```bash
+# SSH into Pi
 ssh pi@your-pi-ip
 
-# Clone/copy the mao_game folder
-cd ~/projects
-# Copy the mao_game folder here
+# Clone repo
+git clone https://github.com/your-username/mao-game.git
+cd mao-game/mao_game
 
-# Install dependencies
+# Install
 python3 -m venv venv
 source venv/bin/activate
 pip install aiohttp bcrypt
 
-# Run the server
-make web PORT=8080
-# or: python -m mao_game server --web --port 8080
+# Run (use screen or systemd for persistence)
+make web
 ```
 
-**Access via:**
-- Local network: `http://your-pi-ip:8080`
-- Tailscale: `http://your-tailscale-pi-ip:8080`
+**Step 4: Access**
+- GitHub Pages: `https://your-username.github.io/mao-game/`
+- Connects to your Pi's WebSocket server
 
-### Option 2: GitHub Pages + External Server
+### Option 2: Self-Hosted (All-in-One)
 
-GitHub Pages can ONLY serve static files. For the WebSocket server, you need a separate backend.
+Run everything on your Pi - simplest option.
 
-**Architecture:**
-```
-[GitHub Pages]          [Your Server]
-    static/        ←→   WebSocket server
-   index.html           websocket_server.py
-   client.js            :8080
-   style.css
-```
-
-**Steps:**
-
-1. **Deploy Static Files to GitHub Pages:**
 ```bash
-# Create gh-pages branch
-cd mao_game
-git checkout -b gh-pages
+# On Pi
+make web PORT=80
 
-# Push only static files
-git push origin gh-pages
-
-# Enable GitHub Pages in repo settings
-# Set source to gh-pages branch
+# Access via http://your-pi-ip
 ```
-
-2. **Update client.js WebSocket URL:**
-```javascript
-// In client.js, change the WebSocket connection:
-const wsUrl = `wss://your-server.com/ws`;
-// Or detect environment:
-const wsUrl = window.location.hostname === 'localhost'
-    ? `ws://localhost:8080/ws`
-    : `wss://your-server.com/ws`;
-```
-
-3. **Run WebSocket Server:**
-- On your Pi, VPS, or any server with public IP
-- Use HTTPS/WSS with proper SSL certificates
 
 ### Option 3: Tailscale for Secure Access
 
-Use Tailscale to securely access your Pi from anywhere.
+Use Tailscale to access your Pi from anywhere without exposing ports.
 
-**Steps:**
-1. Install Tailscale on Pi: `curl -fsSL https://tailscale.com/install.sh | sh`
-2. Install Tailscale on your devices
-3. Access via Tailscale IP: `http://100.x.y.z:8080`
-
-**With Tailscale Funnel (public access):**
 ```bash
-# On your Pi
+# Install Tailscale on Pi
+curl -fsSL https://tailscale.com/install.sh | sh
+tailscale up
+
+# Get your Tailscale IP
+tailscale ip
+# → 100.x.y.z
+
+# Access via http://100.x.y.z:8080
+```
+
+**Public Access with Tailscale Funnel:**
+```bash
 tailscale funnel 8080
-# This gives you a public URL like: https://your-name.ts.net
+# Gives public URL: https://your-name.ts.net
 ```
 
-## Docker Deployment
+## Persistent Server (systemd)
 
-A Dockerfile and docker-compose.yml are included.
+Create `/etc/systemd/system/mao-game.service`:
+
+```ini
+[Unit]
+Description=Mao Game Server
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/mao-game/mao_game
+Environment=PYTHONPATH=/home/pi/mao-game
+ExecStart=/home/pi/mao-game/mao_game/venv/bin/python -m mao_game server --web --port 8080
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
 
 ```bash
-# Build and run with Docker
-docker-compose up -d
-
-# Or build manually
-docker build -t mao-game .
-docker run -p 8080:8080 mao-game
+sudo systemctl daemon-reload
+sudo systemctl enable mao-game
+sudo systemctl start mao-game
 ```
 
-## Testing
-
-Run the test suite:
-```bash
-make test
-# or: python -m pytest tests/ -v
-```
-
-## Linting
-
-Add a linter for code quality:
-```bash
-# Install flake8
-pip install flake8
-
-# Run linter
-flake8 mao_game/ --max-line-length=100 --ignore=E501,W503
-```
-
-## Assets Needed
-
-The game currently uses text-based card rendering. To improve:
-
-1. **Card Images** - Already in `static/cards/` (SVG/PNG playing cards)
-2. **Logo** - `mao.jpeg` exists, could be used for branding
-3. **Favicon** - Create a favicon.ico
-4. **Background** - Optional texture/pattern for theme
-
-## RESTful API Explanation
-
-The current architecture uses WebSocket for real-time communication. A RESTful API would add:
-
-**Benefits:**
-- HTTP endpoints for queries (GET /api/lobbies)
-- Easier debugging with curl/Postman
-- Polling fallback for clients without WebSocket
-
-**Example Endpoints:**
-```
-GET  /api/lobbies           # List lobbies
-POST /api/lobbies           # Create lobby
-GET  /api/lobbies/{code}    # Get lobby info
-POST /api/lobbies/{code}/join   # Join lobby
-
-# Game actions via WebSocket for real-time
-ws://server/ws?lobby=CODE   # WebSocket connection
-```
-
-**Implementation:**
-Add HTTP route handlers alongside WebSocket in `websocket_server.py`:
-```python
-async def _serve_lobbies_api(self, request):
-    lobbies = self.lobby_manager.list_lobbies()
-    return web.json_response({"lobbies": lobbies})
-```
-
-## Project Structure
+## File Structure
 
 ```
 mao_game/
-├── __init__.py
-├── __main__.py           # Entry point
-├── main.py               # CLI handler
-├── Makefile              # Build/test commands
-├── requirements.txt      # Python dependencies
 ├── config/
-│   ├── settings.py      # Game configuration
-│   └── rules.json       # Rule definitions
-├── core/
-│   ├── card.py          # Card class
-│   ├── deck.py          # Deck class
-│   ├── game.py          # Game state logic
-│   └── player.py        # Player class
-├── network/
-│   ├── lobby_manager.py # Multi-lobby support
-│   ├── protocol.py      # Message types
-│   └── websocket_server.py  # Main server
-├── static/
-│   ├── index.html       # Main page
-│   ├── client.js        # Frontend logic
-│   ├── style.css        # Styling
-│   └── cards/           # Card images
-└── tests/
-    ├── test_*.py        # Unit tests
-    └── ...
+│   ├── mao_game.db    # SQLite database (auto-created)
+│   ├── lobbies.json   # Lobby metadata
+│   └── rules.json     # Game rules
+├── database/          # Auth module
+├── network/           # WebSocket server
+├── static/           # Frontend (index.html, client.js, style.css)
+└── core/             # Game logic
 ```
 
-## Quick Start
+## Security Notes
 
-```bash
-# From project root
-cd /Users/hathsin/Desktop/claude_test/mao_game
-
-# Install dependencies
-make install
-
-# Run tests
-make test
-
-# Start web server
-make web
-
-# Open browser
-open http://localhost:8080
-```
+- **HTTPS**: GitHub Pages provides HTTPS automatically
+- **WSS**: For secure WebSocket, run server behind nginx with SSL
+- **Passwords**: User and lobby passwords hashed with bcrypt
+- **No tokens**: Session tied to WebSocket connection

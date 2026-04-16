@@ -778,15 +778,21 @@ class GameServer:
 
             # Start the 6-second declaration timer
             if self.game.start_mao_declaration(player_id):
-                card_count = player.get_card_count()
-                card_msg = f" with {card_count} card(s) remaining" if card_count > 0 else " with an empty hand"
-
                 self._broadcast(Message(
                     type=MessageType.NOTIFICATION,
                     data={
-                        "message": f"🎯 {player.name} declares MAO{card_msg}! "
+                        "message": f"{player.name} declares MAO! "
                                    f"Other players have 6 seconds to challenge with a penalty...",
                         "event_type": "mao_declare"
+                    }
+                ))
+
+                # Send mao_declared message to trigger challenge banner
+                self._broadcast(Message(
+                    type=MessageType.MAO_DECLARED,
+                    data={
+                        "declarer_name": player.name,
+                        "declarer_id": player_id
                     }
                 ))
 
@@ -824,7 +830,7 @@ class GameServer:
             self._broadcast(Message(
                 type=MessageType.NOTIFICATION,
                 data={
-                    "message": f"🎉 {player.name} declares MAO and WINS! 🎉",
+                    "message": f"{player.name} declares MAO and WINS!",
                     "event_type": "victory"
                 }
             ))

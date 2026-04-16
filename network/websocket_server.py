@@ -16,6 +16,7 @@ from ..core.game import Game, GamePhase
 from ..core.player import Player
 from ..core.card import Card
 from ..config.settings import MAO_CHALLENGE_TIME, MAX_PLAYERS_PER_LOBBY
+from ..database import create_user, authenticate_user, get_user, update_user_avatar
 
 
 class WebSocketGameServer:
@@ -52,8 +53,13 @@ class WebSocketGameServer:
             MessageType.CREATE_LOBBY: self._handle_create_lobby,
             MessageType.JOIN_LOBBY: self._handle_join_lobby,
             MessageType.LEAVE_LOBBY: self._handle_leave_lobby,
+            # Authentication
+            MessageType.LOGIN: self._handle_login,
+            MessageType.REGISTER: self._handle_register,
+            MessageType.LOGOUT: self._handle_logout,
             # Connection
             MessageType.CONNECT: self._handle_connect,
+            MessageType.UPDATE_AVATAR: self._handle_update_avatar,
             # Game actions
             MessageType.JOIN_GAME: self._handle_join,
             MessageType.LEAVE_GAME: self._handle_leave,
@@ -144,6 +150,7 @@ class WebSocketGameServer:
     async def _handle_connect(self, message: Message, player_id: str):
         """Handle initial connection and name registration."""
         name = message.data.get("name", f"Player_{player_id[:4]}")
+        avatar = message.data.get("avatar")  # Optional avatar
 
         async with self.lock:
             # Ensure unique name
@@ -155,6 +162,7 @@ class WebSocketGameServer:
                 counter += 1
 
             self.clients[player_id]['name'] = name
+            self.clients[player_id]['avatar'] = avatar
             self.player_names[player_id] = name
 
         await self._send_message(player_id, Message(
@@ -164,6 +172,116 @@ class WebSocketGameServer:
         ))
 
         print(f"Player registered: {name} ({player_id})")
+
+    async def _handle_login(self, message: Message, player_id: str):
+        """Handle login request."""
+        username = message.data.get("username", "")
+        password = message.data.get("password", "")
+
+        if not username or not password:
+            await self._send_error(player_id, "Username and password required")
+            return
+
+        user = authenticate_user(username, password)
+        if user:
+            async with self.lock:
+                # Store user info in client data
+                self.clients[player_id]['user_id'] = user['id']
+                self.clients[player_id]['username'] = user['username']
+                self.clients[player_id]['name'] = user['display_name'] or user['username']
+                self.clients[player_id]['avatar'] = user['avatar']
+                self.player_names[player_id] = user['display_name'] or user['username']
+
+            await self._send_message(player_id, Message(
+                type=MessageType.LOGIN_SUCCESS,
+                data={
+                    "user_id": user['id'],
+                    "username": user['username'],
+                    "display_name": user['display_name'] or user['username'],
+                    "avatar": user['avatar']
+                }
+            ))
+            print(f"User logged in: {username} ({player_id})")
+        else:
+            await self._send_error(player_id, "Invalid username or password")
+
+    async def _handle_register(self, message: Message, player_id: str):
+        """Handle registration request."""
+        username = message.data.get("username", "")
+        password = message.data.get("password", "")
+        display_name = message.data.get("display_name") or username
+
+        if not username or not password:
+            await self._send_error(player_id, "Username and password required")
+            return
+
+        if len(username) < 3:
+            await self._send_error(player_id, "Username must be at least 3 characters")
+            return
+
+        if len(password) < 4:
+            await self._send_error(player_id, "Password must be at least 4 characters")
+            return
+
+        user = create_user(username, password, display_name)
+        if user:
+            async with self.lock:
+                # Store user info in client data
+                self.clients[player_id]['user_id'] = user['id']
+                self.clients[player_id]['username'] = user['username']
+                self.clients[player_id]['name'] = user['display_name'] or user['username']
+                self.player_names[player_id] = user['display_name'] or user['username']
+
+            await self._send_message(player_id, Message(
+                type=MessageType.LOGIN_SUCCESS,
+                data={
+                    "user_id": user['id'],
+                    "username": user['username'],
+                    "display_name": user['display_name'],
+                    "avatar": None
+                }
+            ))
+            print(f"User registered: {username} ({player_id})")
+        else:
+            await self._send_error(player_id, "Username already exists")
+
+    async def _handle_logout(self, message: Message, player_id: str):
+        """Handle logout request."""
+        async with self.lock:
+            if 'user_id' in self.clients.get(player_id, {}):
+                del self.clients[player_id]['user_id']
+                del self.clients[player_id]['username']
+                # Keep the name but reset to guest style
+                self.clients[player_id]['name'] = f"Guest_{player_id[:4]}"
+                self.player_names[player_id] = self.clients[player_id]['name']
+
+        await self._send_message(player_id, Message(
+            type=MessageType.SUCCESS,
+            data={"message": "Logged out successfully"}
+        ))
+
+    async def _handle_update_avatar(self, message: Message, player_id: str):
+        """Handle avatar update request."""
+        avatar = message.data.get("avatar")
+
+        async with self.lock:
+            self.clients[player_id]['avatar'] = avatar
+            # Save to database if user is logged in
+            user_id = self.clients[player_id].get('user_id')
+            if user_id:
+                update_user_avatar(user_id, avatar)
+
+        # Broadcast avatar update to all players in the same lobby
+        lobby_code = self.player_lobbies.get(player_id)
+        if lobby_code:
+            lobby = self.lobby_manager.get_lobby(lobby_code)
+            if lobby:
+                await self._broadcast_to_lobby(lobby.code, Message(
+                    type=MessageType.AVATAR_UPDATE,
+                    data={"player_id": player_id, "avatar": avatar}
+                ))
+
+        print(f"Avatar updated for player {player_id}")
 
     # --- Lobby Handlers ---
 
@@ -246,7 +364,8 @@ class WebSocketGameServer:
                     "name": lobby.name,
                     "player_count": len(lobby.clients),
                     "max_players": lobby.max_players,
-                    "num_decks": lobby.num_decks
+                    "num_decks": lobby.num_decks,
+                    "host_id": lobby.host_id
                 }
             ))
 
@@ -577,7 +696,8 @@ class WebSocketGameServer:
         async with self.lock:
             lobby = self._get_player_lobby(player_id)
             game = lobby.game if lobby else None
-            if not game or game.phase != GamePhase.IN_PROGRESS:
+            # Allow penalties during IN_PROGRESS and POINT_OF_ORDER phases
+            if not game or game.phase not in (GamePhase.IN_PROGRESS, GamePhase.POINT_OF_ORDER):
                 await self._send_error(player_id, "Game not in progress")
                 return
 
@@ -852,15 +972,21 @@ class WebSocketGameServer:
                 return
 
             if game.start_mao_declaration(player_id):
-                card_count = player.get_card_count()
-                card_msg = f" with {card_count} card(s) remaining" if card_count > 0 else " with an empty hand"
-
                 await self._broadcast_to_lobby(lobby.code, Message(
                     type=MessageType.NOTIFICATION,
                     data={
-                        "message": f"🎯 {player.name} declares MAO{card_msg}! "
+                        "message": f"{player.name} declares MAO! "
                                    f"Other players have 6 seconds to challenge...",
                         "event_type": "mao_declare"
+                    }
+                ))
+
+                # Send mao_declared message to trigger challenge banner
+                await self._broadcast_to_lobby(lobby.code, Message(
+                    type=MessageType.MAO_DECLARED,
+                    data={
+                        "declarer_name": player.name,
+                        "declarer_id": player_id
                     }
                 ))
 
@@ -895,7 +1021,7 @@ class WebSocketGameServer:
 
             await self._broadcast_to_lobby(lobby_code, Message(
                 type=MessageType.NOTIFICATION,
-                data={"message": f"🎉 {player.name} declares MAO and WINS! 🎉", "event_type": "victory"}
+                data={"message": f"{player.name} declares MAO and WINS!", "event_type": "victory"}
             ))
 
             game.phase = GamePhase.FINISHED
@@ -1042,16 +1168,20 @@ class WebSocketGameServer:
 
         players_data = []
         for player in lobby.game.players:
+            # Get avatar from clients dict
+            player_avatar = self.clients.get(player.id, {}).get('avatar')
             players_data.append({
                 "id": player.id,
                 "name": player.name,
                 "card_count": player.get_card_count(),
-                "is_connected": player.is_connected
+                "is_connected": player.is_connected,
+                "avatar": player_avatar,
+                "is_host": player.id == lobby.host_id
             })
 
         await self._send_message(player_id, Message(
             type=MessageType.PLAYER_LIST,
-            data={"players": players_data}
+            data={"players": players_data, "host_id": lobby.host_id}
         ))
 
     async def _broadcast_game_state(self, lobby: Lobby):
@@ -1066,6 +1196,12 @@ class WebSocketGameServer:
 
         for player_id in lobby.clients:
             state = game.to_dict(for_player_id=player_id)
+            # Add avatar data to each player
+            if 'players' in state:
+                for player_data in state['players']:
+                    pid = player_data.get('id')
+                    if pid and pid in self.clients:
+                        player_data['avatar'] = self.clients[pid].get('avatar')
             try:
                 await self._send_message(player_id, Message(
                     type=MessageType.GAME_STATE,

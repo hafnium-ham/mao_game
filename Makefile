@@ -4,6 +4,9 @@
 MAKEFILE_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 VENV_PYTHON := $(MAKEFILE_DIR)venv/bin/python
 
+# Parent directory (contains mao_game package)
+PARENT_DIR := $(shell cd $(MAKEFILE_DIR).. && pwd)
+
 # Use venv python if available, otherwise system python3
 PYTHON := $(shell if [ -x "$(VENV_PYTHON)" ]; then echo "$(VENV_PYTHON)"; else echo python3; fi)
 
@@ -26,16 +29,16 @@ install:
 	$(PYTHON) -m pip install -r requirements.txt
 
 web:
-	cd .. && $(PYTHON) -m mao_game server --web --port $(or $(PORT), 8080)
+	cd $(PARENT_DIR) && PYTHONPATH=$(PARENT_DIR) $(PYTHON) -m mao_game server --web --port $(or $(PORT), 8080)
 
 server:
-	cd .. && $(PYTHON) -m mao_game server --port $(or $(PORT), 5555)
+	cd $(PARENT_DIR) && PYTHONPATH=$(PARENT_DIR) $(PYTHON) -m mao_game server --port $(or $(PORT), 5555)
 
 client:
-	cd .. && $(PYTHON) -m mao_game client --host $(or $(HOST), localhost) --port $(or $(PORT), 5555) --name "$(or $(NAME), Player)"
+	cd $(PARENT_DIR) && PYTHONPATH=$(PARENT_DIR) $(PYTHON) -m mao_game client --host $(or $(HOST), localhost) --port $(or $(PORT), 5555) --name "$(or $(NAME), Player)"
 
 test:
-	cd .. && $(PYTHON) -m pytest mao_game/tests/ -v
+	cd $(PARENT_DIR) && PYTHONPATH=$(PARENT_DIR) $(PYTHON) -m pytest mao_game/tests/ -v
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true

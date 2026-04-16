@@ -1,6 +1,31 @@
-// Mao Card Game - WebSocket Client
+/**
+ * Mao Card Game - WebSocket Client
+ *
+ * This client handles real-time communication with the game server via WebSocket.
+ * It manages:
+ * - Player authentication and session management
+ * - Lobby creation and joining
+ * - Game state synchronization
+ * - UI rendering for cards, players, and game phases
+ * - Point of Order (POO) voting and penalty system
+ * - Avatar upload with drag/zoom cropping
+ *
+ * Architecture:
+ * - Connection is established on intro screen, maintained throughout session
+ * - Server broadcasts game state changes to all clients
+ * - Client actions send messages, server validates and broadcasts updates
+ * - localStorage is used for preferences (theme, keybinds, avatar) with fallback
+ *
+ * Key Message Types:
+ * - connect: Initial connection and name registration
+ * - game_state: Full game state sync
+ * - hand_update: Player's card hand
+ * - notification: Game events (plays, penalties, etc.)
+ * - point_of_order: POO state management
+ * - vote: Penalty voting during POO
+ */
 
-// Card suit symbols
+// Card suit symbols for display
 const SUIT_SYMBOLS = {
     'hearts': '♥',
     'diamonds': '♦',
@@ -12,15 +37,36 @@ const SUIT_SYMBOLS = {
     's': '♠'
 };
 
+// Rank name mapping for card image filenames
+const RANK_NAMES = {
+    'j': 'jack',
+    'q': 'queen',
+    'k': 'king',
+    'a': 'ace'
+};
+
+/**
+ * Convert rank to image filename format.
+ * @param {string} rank - Card rank (A, K, Q, J, 10, etc.)
+ * @returns {string} Rank name for filename
+ */
+function getRankName(rank) {
+    const lower = (rank || '').toString().toLowerCase();
+    return RANK_NAMES[lower] || lower;
+}
+
 // CSS class constants
 const HIDDEN_CLASS = 'hidden';
 
-// Helper: Extract field from message data (handles both direct and nested formats)
+/**
+ * Extract field from message data, handling both direct and nested formats.
+ * Server messages may have {field: value} or {data: {field: value}}.
+ */
 function extractField(data, field, defaultValue = null) {
     return data[field] ?? data.data?.[field] ?? defaultValue;
 }
 
-// Helper: Show/hide modals
+// Modal visibility helpers
 function showModal(modalId) {
     const el = document.getElementById(modalId);
     if (el) el.classList.remove(HIDDEN_CLASS);
@@ -40,31 +86,84 @@ function cacheDom() {
     DOM.notifications = document.getElementById('notifications');
     DOM.myHand = document.getElementById('my-hand');
 }
-let playerId = null;
-let playerName = null;
-let gameState = null;
-let myHand = [];
-let selectedPlayerId = null;
-let viewingHand = false;
-let pooActive = false;
-let currentLobbyCode = null;
-let currentTheme = 'dark';
+
+// Game state variables
+let playerId = null;          // Current player's unique ID
+let playerName = null;         // Current player's display name
+let gameState = null;          // Current game state from server
+let myHand = [];              // Player's current hand
+let selectedPlayerId = null;   // Target for player actions
+let viewingHand = false;       // POO hand visibility state
+let pooActive = false;         // Point of Order active flag
+let currentLobbyCode = null;   // Current lobby code
+let currentTheme = 'dark';     // UI theme preference
+
+/**
+ * Safe localStorage wrapper - handles blocked storage in non-private browsing.
+ * Some browsers block localStorage in certain contexts (e.g., third-party iframes).
+ * These helpers provide fallback behavior when storage is unavailable.
+ */
+function safeGetItem(key, defaultValue = null) {
+    try {
+        const value = localStorage.getItem(key);
+        return value !== null ? JSON.parse(value) : defaultValue;
+    } catch (e) {
+        console.warn('localStorage not available:', e);
+        return defaultValue;
+    }
+}
+
+function safeSetItem(key, value) {
+    try {
+        localStorage.setItem(key, JSON.stringify(value));
+        return true;
+    } catch (e) {
+        console.warn('localStorage not available:', e);
+        return false;
+    }
+}
+
+function safeGetRawItem(key, defaultValue = null) {
+    try {
+        const value = localStorage.getItem(key);
+        return value !== null ? value : defaultValue;
+    } catch (e) {
+        console.warn('localStorage not available:', e);
+        return defaultValue;
+    }
+}
+
+function safeSetRawItem(key, value) {
+    try {
+        localStorage.setItem(key, value);
+        return true;
+    } catch (e) {
+        console.warn('localStorage not available:', e);
+        return false;
+    }
+}
 
 // Penalty reasons (stored in localStorage)
-let penaltyReasons = JSON.parse(localStorage.getItem('mao_penaltyReasons')) || [
-    'Wrong play',
-    'Failure to knock',
-    'Speaking out of turn',
-    'Touching cards during POO',
-    'Looking at cards during play'
-];
+let penaltyReasons = safeGetItem('mao_penaltyReasons', []);
+
+// Default penalty cards
+let defaultPenaltyCards = parseInt(safeGetRawItem('mao_penaltyCards', '1')) || 1;
+
+// Default keybinds
+const DEFAULT_KEYBINDS = {
+    draw: 'd',
+    knock: 'k',
+    mao: 'm',
+    chat: 's'
+};
+let keybinds = safeGetItem('mao_keybinds', { ...DEFAULT_KEYBINDS });
 
 // Theme management
 function setTheme(theme) {
     currentTheme = theme;
     // Remove all theme classes and add the new one
     document.body.className = theme === 'dark' ? '' : `theme-${theme}`;
-    localStorage.setItem('mao_theme', theme);
+    safeSetRawItem('mao_theme', theme);
 
     // Update active button
     document.querySelectorAll('.theme-btn').forEach(btn => {
@@ -74,8 +173,11 @@ function setTheme(theme) {
 
 // Initialize theme from localStorage
 document.addEventListener('DOMContentLoaded', () => {
-    const savedTheme = localStorage.getItem('mao_theme') || 'dark';
+    const savedTheme = safeGetRawItem('mao_theme', 'dark');
     setTheme(savedTheme);
+
+    // Restore user session
+    restoreSession();
 
     // Theme buttons
     document.querySelectorAll('.theme-btn').forEach(btn => {
@@ -95,6 +197,26 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Enter' && nameInput.value.trim()) {
             handleIntroContinue();
         }
+    });
+
+    // Auth buttons
+    document.getElementById('login-toggle-link').addEventListener('click', (e) => {
+        e.preventDefault();
+        toggleAuthForm();
+    });
+    document.getElementById('auth-submit-btn').addEventListener('click', submitAuth);
+    document.getElementById('auth-toggle-btn').addEventListener('click', () => {
+        if (isRegisterMode) {
+            showLoginForm();
+        } else {
+            showRegisterForm();
+        }
+    });
+    document.getElementById('auth-cancel-btn').addEventListener('click', () => {
+        document.getElementById('login-form').classList.add('hidden');
+    });
+    document.getElementById('auth-password').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') submitAuth();
     });
 
     // Lobby buttons
@@ -124,7 +246,7 @@ function initDraggableChat() {
     let offset = { x: 0, y: 0 };
 
     // Load saved position
-    const savedPos = JSON.parse(localStorage.getItem('mao_chatPos') || '{}');
+    const savedPos = safeGetItem('mao_chatPos', {});
     if (savedPos.left !== undefined) {
         panel.style.left = savedPos.left + 'px';
         panel.style.top = savedPos.top + 'px';
@@ -174,10 +296,10 @@ function initDraggableChat() {
         if (dragging) {
             dragging = false;
             // Save position
-            localStorage.setItem('mao_chatPos', JSON.stringify({
+            safeSetItem('mao_chatPos', {
                 left: parseInt(panel.style.left) || 10,
                 top: parseInt(panel.style.top) || 140
-            }));
+            });
         }
     });
 
@@ -212,9 +334,10 @@ function connect(callback) {
     ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
+        const savedAvatar = safeGetRawItem('mao_avatar');
         sendMessage({
             type: 'connect',
-            data: { name: playerName }
+            data: { name: playerName, avatar: savedAvatar || null }
         });
         if (callback) callback();
     };
@@ -261,6 +384,7 @@ function handleMessage(data) {
 // Message type handlers
 const messageHandlers = {
     'connect': handleConnect,
+    'login_success': handleLoginSuccess,
     'lobby_list': handleLobbyList,
     'lobby_created': handleLobbyCreated,
     'lobby_joined': handleLobbyJoined,
@@ -276,14 +400,119 @@ const messageHandlers = {
     'error': handleError,
     'success': handleSuccess,
     'mao_declared': handleMaoDeclared,
-    'game_log': handleGameLog
+    'game_log': handleGameLog,
+    'avatar_update': handleAvatarUpdate
 };
+
+// Auth state
+let currentUser = null;  // { id, username, display_name, avatar }
+let isRegisterMode = false;
 
 // Message Handlers
 function handleConnect(data) {
     playerId = data.player_id || data.data?.player_id;
     const name = data.name || data.data?.name || playerName;
     showStatus(`Connected as ${name}`, 'success');
+}
+
+function handleLoginSuccess(data) {
+    const user = data.data || data;
+    currentUser = {
+        id: user.user_id,
+        username: user.username,
+        display_name: user.display_name || user.username,
+        avatar: user.avatar
+    };
+
+    // Update UI
+    const nameInput = document.getElementById('player-name');
+    nameInput.value = currentUser.display_name;
+
+    const loginStatus = document.getElementById('login-status');
+    loginStatus.textContent = `Logged in as ${currentUser.display_name}`;
+
+    const loginForm = document.getElementById('login-form');
+    loginForm.classList.add('hidden');
+
+    // Save session
+    safeSetItem('mao_user', currentUser);
+
+    showStatus(`Logged in as ${currentUser.display_name}`, 'success');
+
+    // If connected, update name
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        sendMessage({
+            type: 'connect',
+            data: { name: currentUser.display_name, avatar: currentUser.avatar }
+        });
+    }
+}
+
+// Auth UI functions
+function toggleAuthForm() {
+    const loginForm = document.getElementById('login-form');
+    loginForm.classList.toggle('hidden');
+}
+
+function showRegisterForm() {
+    isRegisterMode = true;
+    document.getElementById('auth-title').textContent = 'Register';
+    document.getElementById('auth-submit-btn').textContent = 'Register';
+    document.getElementById('auth-display-name').classList.remove('hidden');
+    document.getElementById('auth-toggle-btn').textContent = 'Back to Login';
+}
+
+function showLoginForm() {
+    isRegisterMode = false;
+    document.getElementById('auth-title').textContent = 'Login';
+    document.getElementById('auth-submit-btn').textContent = 'Login';
+    document.getElementById('auth-display-name').classList.add('hidden');
+    document.getElementById('auth-toggle-btn').textContent = 'Register';
+}
+
+function submitAuth() {
+    const username = document.getElementById('auth-username').value.trim();
+    const password = document.getElementById('auth-password').value;
+    const displayName = document.getElementById('auth-display-name').value.trim();
+
+    if (!username || !password) {
+        showStatus('Username and password required', 'error');
+        return;
+    }
+
+    if (isRegisterMode) {
+        sendMessage({
+            type: 'register',
+            data: { username, password, display_name: displayName || username }
+        });
+    } else {
+        sendMessage({
+            type: 'login',
+            data: { username, password }
+        });
+    }
+}
+
+function logout() {
+    sendMessage({ type: 'logout' });
+    currentUser = null;
+    safeSetItem('mao_user', null);
+    document.getElementById('login-status').textContent = '';
+    showStatus('Logged out', 'success');
+}
+
+// Restore session from localStorage
+function restoreSession() {
+    const saved = safeGetItem('mao_user');
+    if (saved) {
+        try {
+            currentUser = saved;
+            document.getElementById('player-name').value = currentUser.display_name;
+            document.getElementById('login-status').textContent = `Logged in as ${currentUser.display_name}`;
+        } catch (e) {
+            safeSetItem('mao_user', null);
+        }
+    }
 }
 
 // Lobby Handlers
@@ -315,7 +544,9 @@ function handleLobbyJoined(data) {
     const name = data.name || data.data?.name;
     const maxPlayers = data.max_players || data.data?.max_players || 10;
     const numDecks = data.num_decks || data.data?.num_decks || 1;
+    const hostId = data.host_id || data.data?.host_id;
     currentLobbyCode = code;
+    lobbyHostId = hostId;
 
     // Update lobby display
     const maxPlayersEl = document.getElementById('max-players');
@@ -422,7 +653,7 @@ function renderLobbyList(lobbies) {
 
     container.innerHTML = lobbies.map(lobby => `
         <div class="lobby-card" onclick="showJoinModal('${lobby.code}', '${lobby.name}')">
-            <h3>${lobby.name} ${lobby.has_password ? '🔒' : ''}</h3>
+            <h3>${lobby.name} ${lobby.has_password ? '[locked]' : ''}</h3>
             <div class="lobby-info">
                 <span>Players: ${lobby.player_count}/${lobby.max_players || 10}</span>
                 <span>Code: ${lobby.code}</span>
@@ -443,12 +674,31 @@ function leaveLobby() {
 
 function handlePlayerList(data) {
     const players = data.players || data.data?.players || [];
+    const hostId = data.host_id || data.data?.host_id;
+    lobbyHostId = hostId;
+
+    // Store avatars from player list
+    players.forEach(player => {
+        if (player.avatar) {
+            playerAvatars[player.id] = player.avatar;
+        }
+    });
+
     updatePlayerListDisplay(players, 'lobby');
 }
 
 function handleGameState(data) {
     gameState = data.data || data;
     console.log('Game state:', gameState);
+
+    // Extract avatars from players list
+    if (gameState.players) {
+        gameState.players.forEach(player => {
+            if (player.avatar) {
+                playerAvatars[player.id] = player.avatar;
+            }
+        });
+    }
 
     // Extract my hand from players list if present
     if (gameState.players && playerId) {
@@ -538,8 +788,9 @@ function updateGameDisplay() {
     // Update discard pile
     updateDiscardPile();
 
-    // Update draw pile count
+    // Update draw pile count and card back
     document.getElementById('draw-count').textContent = gameState.draw_pile_count || 0;
+    renderCardBack(document.getElementById('draw-card'));
 
     // Update recent cards
     updateRecentCards();
@@ -562,6 +813,7 @@ function updatePlayerPositions() {
     otherPlayers.forEach((player, index) => {
         const div = document.createElement('div');
         div.className = 'player-slot';
+        div.dataset.playerId = player.id;
 
         if (gameState.current_player_id === player.id) {
             div.classList.add('current-turn');
@@ -573,9 +825,19 @@ function updatePlayerPositions() {
         div.style.left = pos.left;
         div.style.top = pos.top;
 
-        const avatar = document.createElement('div');
-        avatar.className = 'player-avatar';
-        avatar.textContent = player.name.charAt(0).toUpperCase();
+        // Render avatar - use image if available, otherwise initial letter
+        const avatarDiv = document.createElement('div');
+        avatarDiv.className = 'player-avatar';
+
+        if (playerAvatars[player.id]) {
+            const img = document.createElement('img');
+            img.className = 'player-avatar-img';
+            img.src = playerAvatars[player.id];
+            img.alt = player.name;
+            avatarDiv.appendChild(img);
+        } else {
+            avatarDiv.textContent = player.name.charAt(0).toUpperCase();
+        }
 
         const nameDiv = document.createElement('div');
         nameDiv.className = 'player-name';
@@ -585,7 +847,7 @@ function updatePlayerPositions() {
         countDiv.className = 'player-card-count';
         countDiv.textContent = `${player.card_count || 0}`;
 
-        div.appendChild(avatar);
+        div.appendChild(avatarDiv);
         div.appendChild(nameDiv);
         div.appendChild(countDiv);
 
@@ -634,15 +896,15 @@ function updateRecentCards() {
     container.innerHTML = '';
     if (sidebarContainer) sidebarContainer.innerHTML = '';
 
-    if (!gameState.recent_cards || gameState.recent_cards.length <= 1) {
+    if (!gameState.recent_cards || gameState.recent_cards.length === 0) {
         container.style.display = 'none';
         return;
     }
 
     container.style.display = 'flex';
 
-    // Show last 5 plays (excluding current top card) - newest first
-    const recent = gameState.recent_cards.slice(0, -1).slice(-5).reverse();
+    // Show last 6 plays INCLUDING current top card - newest first
+    const recent = gameState.recent_cards.slice(-6).reverse();
     recent.forEach(play => {
         const card = play.card || play;
         const playerName = play.player_name || '';
@@ -675,11 +937,12 @@ function renderCard(container, card) {
     const suitSymbol = SUIT_SYMBOLS[card.suit?.toLowerCase()] || card.suit || '';
 
     // Try to use card image first
-    const rank = (card.rank || card.Rank || '').toString().toLowerCase();
+    const rank = (card.rank || card.Rank || '').toString();
     const suit = (card.suit || card.Suit || '').toLowerCase();
+    const rankName = getRankName(rank);
 
-    if (rank && suit) {
-        const cardName = `${rank}_of_${suit}`;
+    if (rankName && suit) {
+        const cardName = `${rankName}_of_${suit}`;
         const imgPath = `/cards/${cardName}.png`;
 
         const img = new Image();
@@ -712,6 +975,26 @@ function renderCard(container, card) {
     container.className = `card ${suit}`;
 }
 
+// Render a card back image
+function renderCardBack(container) {
+    container.innerHTML = '';
+    container.className = 'card back';
+
+    const img = new Image();
+    img.src = '/cards/card_back.png';
+    img.alt = 'Card back';
+    img.style.width = '100%';
+    img.style.height = '100%';
+    img.style.objectFit = 'contain';
+
+    img.onerror = () => {
+        // Fallback to text
+        container.innerHTML = '<span class="rank">?</span>';
+    };
+
+    container.appendChild(img);
+}
+
 function handleHandUpdate(data) {
     myHand = data.hand || data.data?.hand || [];
     renderHand();
@@ -727,10 +1010,38 @@ function renderHand() {
         cardDiv.dataset.index = index;
 
         const suitSymbol = SUIT_SYMBOLS[card.suit?.toLowerCase()] || card.suit || '';
-        cardDiv.innerHTML = `
-            <span class="rank">${card.rank || card.Rank || '?'}</span>
-            <span class="suit-symbol">${suitSymbol}</span>
-        `;
+        const rank = (card.rank || card.Rank || '').toString();
+        const suit = (card.suit || card.Suit || '').toLowerCase();
+        const rankName = getRankName(rank);
+
+        if (rankName && suit) {
+            const cardName = `${rankName}_of_${suit}`;
+            const imgPath = `/cards/${cardName}.png`;
+
+            const img = new Image();
+            img.src = imgPath;
+            img.alt = `${rank} of ${suit}`;
+            img.style.width = '100%';
+            img.style.height = '100%';
+            img.style.objectFit = 'contain';
+
+            img.onload = () => {
+                cardDiv.innerHTML = '';
+                cardDiv.appendChild(img);
+            };
+
+            img.onerror = () => {
+                cardDiv.innerHTML = `
+                    <span class="rank">${card.rank || card.Rank || '?'}</span>
+                    <span class="suit-symbol">${suitSymbol}</span>
+                `;
+            };
+        } else {
+            cardDiv.innerHTML = `
+                <span class="rank">${card.rank || card.Rank || '?'}</span>
+                <span class="suit-symbol">${suitSymbol}</span>
+            `;
+        }
 
         cardDiv.addEventListener('click', () => playCard(card));
         handContainer.appendChild(cardDiv);
@@ -809,13 +1120,20 @@ function sendChatMessage() {
     // Check for POO commands
     const lowerMessage = message.toLowerCase();
 
-    if (lowerMessage.includes('point of order') && lowerMessage.includes('end')) {
-        sendMessage({ type: 'end_point_of_order' });
-    } else if (lowerMessage.includes('point of order')) {
-        sendMessage({
-            type: 'point_of_order',
-            data: { reason: message }
-        });
+    if (lowerMessage.includes('point of order')) {
+        // Check if this is "end point of order" (end before "point of order")
+        const pooIndex = lowerMessage.indexOf('point of order');
+        const endIndex = lowerMessage.indexOf('end');
+
+        // Only trigger END if "end" appears before "point of order"
+        if (endIndex !== -1 && endIndex < pooIndex) {
+            sendMessage({ type: 'end_point_of_order' });
+        } else {
+            sendMessage({
+                type: 'point_of_order',
+                data: { reason: message }
+            });
+        }
     } else {
         sendMessage({
             type: 'chat',
@@ -830,12 +1148,22 @@ function handlePointOfOrder(data) {
     pooActive = true;
     document.body.classList.add('poo-active');
     document.getElementById('poo-indicator').classList.remove('hidden');
-    document.getElementById('view-hand-btn').classList.remove('hidden');
+
+    // Show POO action buttons
+    document.getElementById('shuffle-btn').classList.remove('hidden');
+    document.getElementById('end-poo-btn').classList.remove('hidden');
+
+    // Collapse hand during POO
+    const playerArea = document.querySelector('.player-area');
+    const hand = document.getElementById('my-hand');
+    if (playerArea && hand) {
+        playerArea.classList.add('collapsed');
+        hand.classList.add('collapsed');
+        playerArea.onclick = togglePooHand;
+    }
 
     const reason = data.reason || data.data?.reason || 'No reason given';
     const caller = data.caller_name || data.data?.caller_name || 'Someone';
-    document.getElementById('poo-reason').textContent = reason;
-    document.getElementById('poo-caller').textContent = caller;
 
     // Update the POO indicator banner text
     const reasonText = document.getElementById('poo-reason-text');
@@ -843,16 +1171,23 @@ function handlePointOfOrder(data) {
         reasonText.textContent = ` - ${caller}: ${reason}`;
     }
 
-    // Show POO modal with penalty history
-    const pooModal = document.getElementById('poo-modal');
-
-    // Update penalty history
+    // Update penalty history for voting (if penalty panel exists)
     const penaltyHistory = data.penalty_history || data.data?.penalty_history || [];
+    updatePenaltyVoting(penaltyHistory);
+
+    // Show vote panel if there's an active vote
+    const activeVote = data.active_vote || data.data?.active_vote || null;
+    showVotePanel(activeVote);
+}
+
+function updatePenaltyVoting(penaltyHistory) {
     const penaltyList = document.getElementById('penalty-list');
+    if (!penaltyList) return;
+
     penaltyList.innerHTML = '';
 
     if (penaltyHistory.length === 0) {
-        penaltyList.innerHTML = '<p>No penalties yet</p>';
+        penaltyList.innerHTML = '<p>No penalties to vote on</p>';
     } else {
         penaltyHistory.forEach((penalty, index) => {
             const div = document.createElement('div');
@@ -862,24 +1197,111 @@ function handlePointOfOrder(data) {
             penaltyList.appendChild(div);
         });
     }
+}
 
-    pooModal.classList.remove('hidden');
+function showVotePanel(activeVote) {
+    const panel = document.getElementById('penalty-voting-panel');
+    if (!activeVote || !panel) {
+        if (panel) panel.classList.add('hidden');
+        return;
+    }
+
+    const penalty = activeVote.penalty;
+    document.getElementById('vote-penalty-desc').textContent =
+        `${penalty.caller_name} → ${penalty.target_name}: ${penalty.reason} (${penalty.cards} cards)`;
+
+    document.getElementById('vote-uphold-count').textContent = activeVote.uphold_count || 0;
+    document.getElementById('vote-overturn-count').textContent = activeVote.overturn_count || 0;
+    document.getElementById('vote-abstain-count').textContent = activeVote.abstain_count || 0;
+
+    panel.classList.remove('hidden');
+}
+
+function castVote(vote) {
+    sendMessage({
+        type: 'vote',
+        data: { vote: vote }
+    });
 }
 
 function activatePooMode() {
     pooActive = true;
     document.body.classList.add('poo-active');
     document.getElementById('poo-indicator').classList.remove('hidden');
-    document.getElementById('view-hand-btn').classList.remove('hidden');
+    // Show POO action buttons
+    document.getElementById('shuffle-btn').classList.remove('hidden');
+    document.getElementById('end-poo-btn').classList.remove('hidden');
+    // Collapse hand during POO
+    const playerArea = document.querySelector('.player-area');
+    const hand = document.getElementById('my-hand');
+    if (playerArea && hand) {
+        playerArea.classList.add('collapsed');
+        hand.classList.add('collapsed');
+        playerArea.onclick = togglePooHand;
+    }
+}
+
+let pooHandExpanded = false;
+
+function togglePooHand() {
+    const playerArea = document.querySelector('.player-area');
+    const hand = document.getElementById('my-hand');
+
+    if (!pooHandExpanded) {
+        // Expand - view hand
+        pooHandExpanded = true;
+        hand.classList.remove('collapsed');
+        playerArea.classList.remove('collapsed');
+        playerArea.classList.add('expanded-announce');
+        // Broadcast to all players that we're viewing hand
+        sendMessage({ type: 'view_hand' });
+        // Allow clicking again to collapse
+        playerArea.onclick = collapsePooHand;
+    }
+}
+
+function collapsePooHand() {
+    const playerArea = document.querySelector('.player-area');
+    const hand = document.getElementById('my-hand');
+
+    pooHandExpanded = false;
+    hand.classList.add('collapsed');
+    playerArea.classList.remove('expanded-announce');
+    playerArea.classList.add('collapsed');
+    playerArea.onclick = togglePooHand;
 }
 
 function deactivatePooMode() {
     pooActive = false;
+    pooHandExpanded = false;
     document.body.classList.remove('poo-active');
     document.getElementById('poo-indicator').classList.add('hidden');
     document.getElementById('poo-modal').classList.add('hidden');
-    document.getElementById('view-hand-btn').classList.add('hidden');
+    // Hide POO action buttons
+    document.getElementById('shuffle-btn').classList.add('hidden');
+    document.getElementById('end-poo-btn').classList.add('hidden');
+    // Hide vote panel
+    const votePanel = document.getElementById('penalty-voting-panel');
+    if (votePanel) votePanel.classList.add('hidden');
+    // Restore hand display
+    const playerArea = document.querySelector('.player-area');
+    const hand = document.getElementById('my-hand');
+    if (playerArea && hand) {
+        playerArea.classList.remove('collapsed', 'expanded-announce');
+        hand.classList.remove('collapsed');
+        playerArea.onclick = null;
+    }
     viewingHand = false;
+}
+
+function showPooModal() {
+    if (!pooActive) return;
+    const modal = document.getElementById('poo-modal');
+    modal.classList.remove('hidden');
+}
+
+function closePooModal() {
+    document.getElementById('poo-modal').classList.add('hidden');
 }
 
 function handleGameOver(data) {
@@ -889,7 +1311,7 @@ function handleGameOver(data) {
 
     const modal = document.getElementById('game-over-modal');
     const winnerText = winnerId === playerId
-        ? `🎉 You win with ${cardCount} cards remaining! 🎉`
+        ? `You win with ${cardCount} cards remaining!`
         : `${winnerName} wins with ${cardCount} cards remaining!`;
     document.getElementById('winner-text').textContent = winnerText;
     modal.classList.remove('hidden');
@@ -1053,14 +1475,23 @@ function hitPlayer() {
     });
 
     closePlayerModal();
-    showNotification(`Hit sent!`, 'hit');
 }
+
+// Throw card target (saved before closing player modal)
+let throwTargetId = null;
+let throwTargetName = null;
+
+// Penalty target (saved before closing player modal)
+let penaltyTargetId = null;
+let penaltyTargetName = null;
 
 function showThrowCardDialog() {
     if (!selectedPlayerId) return;
 
-    const targetName = document.getElementById('player-action-name').textContent;
-    document.getElementById('throw-target-name').textContent = targetName;
+    // Save target before closing modal
+    throwTargetId = selectedPlayerId;
+    throwTargetName = document.getElementById('player-action-name').textContent;
+    document.getElementById('throw-target-name').textContent = throwTargetName;
     document.getElementById('throw-card-modal').classList.remove('hidden');
 
     // Show cards from hand
@@ -1071,10 +1502,38 @@ function showThrowCardDialog() {
         const cardDiv = document.createElement('div');
         cardDiv.className = `card ${(card.suit || '').toLowerCase()}`;
         const suitSymbol = SUIT_SYMBOLS[card.suit?.toLowerCase()] || card.suit || '';
-        cardDiv.innerHTML = `
-            <span class="rank">${card.rank || '?'}</span>
-            <span class="suit-symbol">${suitSymbol}</span>
-        `;
+        const rank = (card.rank || '').toString();
+        const suit = (card.suit || '').toLowerCase();
+        const rankName = getRankName(rank);
+
+        if (rankName && suit) {
+            const cardName = `${rankName}_of_${suit}`;
+            const imgPath = `/cards/${cardName}.png`;
+
+            const img = new Image();
+            img.src = imgPath;
+            img.alt = `${rank} of ${suit}`;
+            img.style.width = '100%';
+            img.style.height = '100%';
+            img.style.objectFit = 'contain';
+
+            img.onload = () => {
+                cardDiv.innerHTML = '';
+                cardDiv.appendChild(img);
+            };
+
+            img.onerror = () => {
+                cardDiv.innerHTML = `
+                    <span class="rank">${card.rank || '?'}</span>
+                    <span class="suit-symbol">${suitSymbol}</span>
+                `;
+            };
+        } else {
+            cardDiv.innerHTML = `
+                <span class="rank">${card.rank || '?'}</span>
+                <span class="suit-symbol">${suitSymbol}</span>
+            `;
+        }
         cardDiv.onclick = () => throwCard(card);
         throwHand.appendChild(cardDiv);
     });
@@ -1087,17 +1546,19 @@ function closeThrowModal() {
 }
 
 function throwCard(card) {
-    if (!selectedPlayerId) return;
+    if (!throwTargetId) return;
 
     sendMessage({
         type: 'throw_card',
         data: {
             card: card,
-            target_id: selectedPlayerId
+            target_id: throwTargetId
         }
     });
 
     closeThrowModal();
+    throwTargetId = null;
+    throwTargetName = null;
     showNotification(`Threw ${card.rank} of ${card.suit}!`, 'throw');
 }
 
@@ -1107,7 +1568,21 @@ function showPenaltyDialog() {
         return;
     }
 
-    // Show modal with player list for selection
+    // Set default penalty cards
+    document.getElementById('penalty-cards').value = defaultPenaltyCards;
+
+    // If a player is already selected (from player action modal), use that player
+    if (selectedPlayerId) {
+        // Save to penaltyTargetId before it gets cleared
+        penaltyTargetId = selectedPlayerId;
+        penaltyTargetName = gameState.players.find(p => p.id === selectedPlayerId)?.name || 'Unknown';
+        document.getElementById('penalty-target').textContent = penaltyTargetName;
+        updatePenaltyReasonsSelect();
+        document.getElementById('penalty-modal').classList.remove('hidden');
+        return;
+    }
+
+    // Otherwise show modal with player list for selection
     const modal = document.getElementById('player-select-modal');
     const list = document.getElementById('player-select-list');
 
@@ -1127,9 +1602,11 @@ function closePlayerSelectModal() {
 }
 
 function selectPlayerForPenalty(id, name) {
-    selectedPlayerId = id;
+    penaltyTargetId = id;
+    penaltyTargetName = name;
     document.getElementById('player-select-modal').classList.add('hidden');
     document.getElementById('penalty-target').textContent = name;
+    document.getElementById('penalty-cards').value = defaultPenaltyCards;
     updatePenaltyReasonsSelect();
     document.getElementById('penalty-modal').classList.remove('hidden');
 }
@@ -1140,9 +1617,13 @@ function showPenaltyDialogForPlayer() {
         return;
     }
 
-    const targetName = document.getElementById('player-action-name')?.textContent ||
+    // Save target BEFORE closing modal (like throw card does)
+    penaltyTargetId = selectedPlayerId;
+    penaltyTargetName = document.getElementById('player-action-name')?.textContent ||
         gameState?.players?.find(p => p.id === selectedPlayerId)?.name || 'Unknown';
-    document.getElementById('penalty-target').textContent = targetName;
+
+    document.getElementById('penalty-target').textContent = penaltyTargetName;
+    document.getElementById('penalty-cards').value = defaultPenaltyCards;
 
     updatePenaltyReasonsSelect();
     document.getElementById('penalty-modal').classList.remove('hidden');
@@ -1167,7 +1648,7 @@ function updatePenaltyReasonsSelect() {
 }
 
 function submitPenalty() {
-    if (!selectedPlayerId) {
+    if (!penaltyTargetId) {
         showNotification('No target selected', 'error');
         return;
     }
@@ -1185,13 +1666,15 @@ function submitPenalty() {
     sendMessage({
         type: 'give_penalty',
         data: {
-            target_id: selectedPlayerId,
+            target_id: penaltyTargetId,
             reason: reason,
             cards: cards
         }
     });
 
     closePenaltyModal();
+    penaltyTargetId = null;  // Clear after submission
+    penaltyTargetName = null;
 }
 
 // POO Actions
@@ -1264,12 +1747,291 @@ function voteOnPenalty(index) {
 // Settings
 function showSettingsModal() {
     renderPenaltyReasons();
+    renderKeybinds();
+    document.getElementById('default-penalty-cards').value = defaultPenaltyCards;
+    // Show current avatar if exists
+    const avatarPreview = document.getElementById('avatar-preview');
+    const savedAvatar = safeGetRawItem('mao_avatar');
+    if (savedAvatar && avatarPreview) {
+        avatarPreview.src = savedAvatar;
+    }
     document.getElementById('settings-modal').classList.remove('hidden');
+}
+
+// Avatar handling with crop modal
+let avatarCropImage = null;      // Original image
+let avatarCropZoom = 1;          // Current zoom level
+let avatarCropOffsetX = 0;        // Pan offset X
+let avatarCropOffsetY = 0;        // Pan offset Y
+let avatarCropDragging = false;   // Is user dragging
+let avatarCropLastX = 0;          // Last mouse X position
+let avatarCropLastY = 0;          // Last mouse Y position
+let avatarCropCanvas = null;      // Canvas element
+
+function showAvatarCropModal(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // Check file size (max 100KB)
+    if (file.size > 100000) {
+        showNotification('Avatar too large (max 100KB)', 'error');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+            // Store image and reset crop state
+            avatarCropImage = img;
+            avatarCropZoom = 1;
+            avatarCropOffsetX = 0;
+            avatarCropOffsetY = 0;
+
+            // Get canvas and set up
+            avatarCropCanvas = document.getElementById('avatar-crop-canvas');
+            avatarCropCanvas.width = 250;
+            avatarCropCanvas.height = 250;
+
+            // Set up drag events
+            avatarCropCanvas.onmousedown = avatarCropStartDrag;
+            avatarCropCanvas.onmousemove = avatarCropDrag;
+            avatarCropCanvas.onmouseup = avatarCropEndDrag;
+            avatarCropCanvas.onmouseleave = avatarCropEndDrag;
+            avatarCropCanvas.onwheel = avatarCropWheel;
+
+            // Render initial crop
+            renderAvatarCrop();
+
+            // Show modal
+            document.getElementById('avatar-crop-modal').classList.remove('hidden');
+        };
+        img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+
+    // Clear file input so same file can be selected again
+    event.target.value = '';
+}
+
+function avatarCropStartDrag(e) {
+    avatarCropDragging = true;
+    avatarCropLastX = e.clientX;
+    avatarCropLastY = e.clientY;
+    avatarCropCanvas.style.cursor = 'grabbing';
+}
+
+function avatarCropDrag(e) {
+    if (!avatarCropDragging) return;
+
+    const dx = e.clientX - avatarCropLastX;
+    const dy = e.clientY - avatarCropLastY;
+
+    avatarCropOffsetX += dx;
+    avatarCropOffsetY += dy;
+
+    avatarCropLastX = e.clientX;
+    avatarCropLastY = e.clientY;
+
+    renderAvatarCrop();
+}
+
+function avatarCropEndDrag() {
+    avatarCropDragging = false;
+    if (avatarCropCanvas) {
+        avatarCropCanvas.style.cursor = 'grab';
+    }
+}
+
+function avatarCropWheel(e) {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    avatarCropZoom = Math.max(0.5, Math.min(5, avatarCropZoom * delta));
+    renderAvatarCrop();
+}
+
+function avatarCropZoomIn() {
+    avatarCropZoom = Math.min(5, avatarCropZoom * 1.2);
+    renderAvatarCrop();
+}
+
+function avatarCropZoomOut() {
+    avatarCropZoom = Math.max(0.5, avatarCropZoom / 1.2);
+    renderAvatarCrop();
+}
+
+function avatarCropReset() {
+    avatarCropZoom = 1;
+    avatarCropOffsetX = 0;
+    avatarCropOffsetY = 0;
+    renderAvatarCrop();
+}
+
+function renderAvatarCrop() {
+    if (!avatarCropCanvas || !avatarCropImage) return;
+
+    const ctx = avatarCropCanvas.getContext('2d');
+    const canvasSize = 250;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, canvasSize, canvasSize);
+
+    // Calculate scaled dimensions
+    const scaledWidth = avatarCropImage.width * avatarCropZoom;
+    const scaledHeight = avatarCropImage.height * avatarCropZoom;
+
+    // Center the image with offsets
+    const centerX = canvasSize / 2 + avatarCropOffsetX;
+    const centerY = canvasSize / 2 + avatarCropOffsetY;
+
+    // Draw image centered
+    ctx.drawImage(
+        avatarCropImage,
+        centerX - scaledWidth / 2,
+        centerY - scaledHeight / 2,
+        scaledWidth,
+        scaledHeight
+    );
+
+    // Draw circular overlay guide
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(canvasSize / 2, canvasSize / 2, canvasSize / 2 - 5, 0, Math.PI * 2);
+    ctx.stroke();
+}
+
+function applyAvatarCrop() {
+    if (!avatarCropImage) return;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 100;
+    canvas.height = 100;
+    const ctx = canvas.getContext('2d');
+
+    // Calculate source coordinates for circular crop
+    const outputSize = 100;
+    const canvasSize = 250;
+
+    // Scale factor from display canvas to output
+    const scale = outputSize / canvasSize;
+
+    // Calculate the portion of the image visible in the circle
+    const scaledWidth = avatarCropImage.width * avatarCropZoom;
+    const scaledHeight = avatarCropImage.height * avatarCropZoom;
+
+    // Center position on canvas
+    const centerX = canvasSize / 2 + avatarCropOffsetX;
+    const centerY = canvasSize / 2 + avatarCropOffsetY;
+
+    // Convert to source image coordinates
+    const srcX = (centerX - scaledWidth / 2) / avatarCropZoom;
+    const srcY = (centerY - scaledHeight / 2) / avatarCropZoom;
+    const srcWidth = scaledWidth / avatarCropZoom;
+    const srcHeight = scaledHeight / avatarCropZoom;
+
+    // Calculate crop size (square crop)
+    const cropSize = Math.min(srcWidth, srcHeight);
+    const cropX = srcX + (srcWidth - cropSize) / 2;
+    const cropY = srcY + (srcHeight - cropSize) / 2;
+
+    // Draw the cropped portion
+    ctx.drawImage(
+        avatarCropImage,
+        cropX, cropY, cropSize, cropSize,
+        0, 0, outputSize, outputSize
+    );
+
+    const avatar = canvas.toDataURL('image/jpeg', 0.9);
+    safeSetRawItem('mao_avatar', avatar);
+    document.getElementById('avatar-preview').src = avatar;
+
+    // Send to server
+    sendMessage({ type: 'update_avatar', data: { avatar: avatar } });
+    showNotification('Avatar updated!', 'success');
+
+    closeAvatarCropModal();
+}
+
+function closeAvatarCropModal() {
+    document.getElementById('avatar-crop-modal').classList.add('hidden');
+    avatarCropImage = null;
+    avatarCropZoom = 1;
+    avatarCropOffsetX = 0;
+    avatarCropOffsetY = 0;
+}
+
+function clearAvatar() {
+    safeSetRawItem('mao_avatar', '');
+    document.getElementById('avatar-preview').src = '';
+    sendMessage({ type: 'update_avatar', data: { avatar: null } });
+    showNotification('Avatar cleared!', 'success');
+}
+
+// Player avatars storage
+let playerAvatars = {};
+
+function handleAvatarUpdate(data) {
+    const playerId = data.player_id || data.data?.player_id;
+    const avatar = data.avatar || data.data?.avatar;
+    if (playerId) {
+        if (avatar) {
+            playerAvatars[playerId] = avatar;
+        } else {
+            delete playerAvatars[playerId];
+        }
+        // Re-render players to update avatars
+        if (gameState) {
+            updatePlayerPositions();
+        }
+    }
+}
+
+function renderKeybinds() {
+    document.getElementById('keybind-draw').value = keybinds.draw.toUpperCase();
+    document.getElementById('keybind-knock').value = keybinds.knock.toUpperCase();
+    document.getElementById('keybind-mao').value = keybinds.mao.toUpperCase();
+    document.getElementById('keybind-chat').value = keybinds.chat.toUpperCase();
+}
+
+function promptKeybind(action) {
+    const input = document.getElementById(`keybind-${action}`);
+    input.value = '...';
+    input.focus();
+
+    const handler = (e) => {
+        e.preventDefault();
+        const key = e.key.toLowerCase();
+        if (key.length === 1 && /[a-z]/.test(key)) {
+            keybinds[action] = key;
+            input.value = key.toUpperCase();
+            safeSetItem('mao_keybinds', keybinds);
+        }
+        document.removeEventListener('keydown', handler);
+    };
+
+    document.addEventListener('keydown', handler);
+    input.onblur = () => {
+        document.removeEventListener('keydown', handler);
+        renderKeybinds();
+    };
+}
+
+function resetKeybinds() {
+    keybinds = { ...DEFAULT_KEYBINDS };
+    safeSetItem('mao_keybinds', keybinds);
+    renderKeybinds();
+}
+
+function saveDefaultPenaltyCards() {
+    const input = document.getElementById('default-penalty-cards');
+    defaultPenaltyCards = parseInt(input.value) || 2;
+    safeSetRawItem('mao_penaltyCards', String(defaultPenaltyCards));
 }
 
 function closeSettingsModal() {
     document.getElementById('settings-modal').classList.add('hidden');
-    localStorage.setItem('mao_penaltyReasons', JSON.stringify(penaltyReasons));
+    safeSetItem('mao_penaltyReasons', penaltyReasons);
     updatePenaltyReasonsSelect();
 }
 
@@ -1349,23 +2111,20 @@ document.addEventListener('keydown', (e) => {
         return;
     }
 
-    switch (e.key.toLowerCase()) {
-        case 'd':
-            e.preventDefault();
-            drawCard();
-            break;
-        case 'k':
-            e.preventDefault();
-            sendKnock();
-            break;
-        case 'm':
-            e.preventDefault();
-            declareMao();
-            break;
-        case 's':
-            e.preventDefault();
-            showSayDialog();
-            break;
+    const key = e.key.toLowerCase();
+
+    if (key === keybinds.draw) {
+        e.preventDefault();
+        drawCard();
+    } else if (key === keybinds.knock) {
+        e.preventDefault();
+        sendKnock();
+    } else if (key === keybinds.mao) {
+        e.preventDefault();
+        declareMao();
+    } else if (key === keybinds.chat) {
+        e.preventDefault();
+        document.getElementById('chat-input').focus();
     }
 });
 
@@ -1415,11 +2174,17 @@ window.submitPenalty = submitPenalty;
 window.viewMyHand = viewMyHand;
 window.shuffleDeck = shuffleDeck;
 window.endPoo = endPoo;
+window.showPooModal = showPooModal;
+window.closePooModal = closePooModal;
 window.voteOnPenalty = voteOnPenalty;
+window.castVote = castVote;
 window.showSettingsModal = showSettingsModal;
 window.closeSettingsModal = closeSettingsModal;
 window.addPenaltyReason = addPenaltyReason;
 window.removePenaltyReason = removePenaltyReason;
+window.promptKeybind = promptKeybind;
+window.resetKeybinds = resetKeybinds;
+window.saveDefaultPenaltyCards = saveDefaultPenaltyCards;
 window.playCard = playCard;
 window.toggleViewHand = toggleViewHand;
 window.closeJoinModal = closeJoinModal;
@@ -1435,3 +2200,9 @@ window.closePlayerSelectModal = closePlayerSelectModal;
 window.selectPlayerForPenalty = selectPlayerForPenalty;
 window.showGameLog = showGameLog;
 window.closeGameLog = closeGameLog;
+window.showAvatarCropModal = showAvatarCropModal;
+window.avatarCropZoomIn = avatarCropZoomIn;
+window.avatarCropZoomOut = avatarCropZoomOut;
+window.avatarCropReset = avatarCropReset;
+window.applyAvatarCrop = applyAvatarCrop;
+window.closeAvatarCropModal = closeAvatarCropModal;

@@ -16,6 +16,23 @@
                 <h2>Player Name</h2>
                 <input type="text" id="player-name" placeholder="Enter name" maxlength="20" autofocus>
                 <button id="continue-btn" class="btn primary" disabled>Continue</button>
+                <div class="login-toggle">
+                    <span id="login-status"></span>
+                    <a href="#" id="login-toggle-link">Login</a>
+                </div>
+            </div>
+
+            <!-- Login Form (hidden by default) -->
+            <div id="login-form" class="intro-box hidden">
+                <h2 id="auth-title">Login</h2>
+                <input type="text" id="auth-username" placeholder="Username" maxlength="20">
+                <input type="password" id="auth-password" placeholder="Password" maxlength="50">
+                <input type="text" id="auth-display-name" placeholder="Display name (optional)" maxlength="30" class="hidden">
+                <div class="auth-buttons">
+                    <button id="auth-submit-btn" class="btn primary">Login</button>
+                    <button id="auth-toggle-btn" class="btn">Register</button>
+                    <button id="auth-cancel-btn" class="btn secondary">Cancel</button>
+                </div>
             </div>
 
             <div class="intro-box">
@@ -99,7 +116,7 @@
             <div class="lobby-info">
                 <span>Players: <span id="player-count">0</span>/<span id="max-players">10</span></span>
                 <span>Decks: <span id="deck-count">1</span></span>
-                <button id="settings-btn" class="icon-btn" title="Settings">⚙️</button>
+                <button id="settings-btn" class="icon-btn" title="Settings">Settings</button>
             </div>
             <div id="players-list" class="players-list"></div>
             <div class="lobby-actions">
@@ -132,7 +149,7 @@
 
             <!-- Played Cards Stack (right side) -->
             <div id="played-stack" class="played-stack">
-                <div class="stack-header">🎴 Played</div>
+                <div class="stack-header">Played</div>
                 <div id="stack-cards" class="stack-cards"></div>
             </div>
 
@@ -145,7 +162,7 @@
             <div class="game-center" id="game-center">
                 <div id="draw-pile" class="card-pile">
                     <div class="pile-label">Draw (<span id="draw-count">0</span>)</div>
-                    <div class="card back" onclick="drawCard()">Draw</div>
+                    <div id="draw-card" class="card back" onclick="drawCard()"></div>
                 </div>
                 <div id="discard-pile" class="card-pile">
                     <div class="pile-label">Discard</div>
@@ -167,23 +184,23 @@
             <!-- Game actions -->
             <div id="actions-panel" class="actions-panel">
                 <button id="knock-btn" onclick="sendKnock()">Knock</button>
-                <button id="say-btn" onclick="showSayDialog()">Say</button>
                 <button id="penalty-btn" onclick="showPenaltyDialog()">Give Penalty</button>
                 <button id="mao-btn" onclick="declareMao()">Declare Mao!</button>
-                <button id="view-hand-btn" class="hidden" onclick="toggleViewHand()">👁️ View Hand</button>
+                <button id="shuffle-btn" class="hidden" onclick="shuffleDeck()">Shuffle Discard</button>
+                <button id="end-poo-btn" class="hidden" onclick="endPoo()">End Point of Order</button>
             </div>
 
             <!-- Command reference -->
             <div id="command-menu" class="command-menu">
                 <div class="command-header" onclick="toggleCommandMenu()">
-                    <span>⌨️ Commands</span>
+                    <span>Commands</span>
                     <span id="command-toggle">▼</span>
                 </div>
                 <div id="command-list" class="command-list">
                     <div class="command-item"><kbd>D</kbd> Draw card</div>
                     <div class="command-item"><kbd>K</kbd> Knock</div>
                     <div class="command-item"><kbd>M</kbd> Declare Mao</div>
-                    <div class="command-item"><kbd>S</kbd> Say something</div>
+                    <div class="command-item"><kbd>S</kbd> Focus chat</div>
                     <div class="command-item"><span>Click card</span> Play card</div>
                     <div class="command-item"><span>Click player</span> Actions menu</div>
                 </div>
@@ -199,9 +216,26 @@
             <div id="notifications" class="notifications"></div>
 
             <!-- POO Indicator -->
-            <div id="poo-indicator" class="poo-indicator hidden">
-                <span>🔴 POINT OF ORDER</span>
+            <div id="poo-indicator" class="poo-indicator hidden" onclick="showPooModal()">
+                <span>POINT OF ORDER</span>
                 <span id="poo-reason-text"></span>
+                <button class="poo-menu-btn">Menu</button>
+            </div>
+
+            <!-- Penalty Voting Panel (during POO) -->
+            <div id="penalty-voting-panel" class="penalty-voting-panel hidden">
+                <div class="vote-header">Vote on Penalty</div>
+                <div id="vote-penalty-desc" class="vote-penalty-desc"></div>
+                <div class="vote-tally">
+                    <span id="vote-uphold-count">0</span> Uphold |
+                    <span id="vote-overturn-count">0</span> Overturn |
+                    <span id="vote-abstain-count">0</span> Abstain
+                </div>
+                <div class="vote-buttons">
+                    <button onclick="castVote('uphold')" class="vote-btn uphold">Uphold</button>
+                    <button onclick="castVote('overturn')" class="vote-btn overturn">Overturn</button>
+                    <button onclick="castVote('abstain')" class="vote-btn abstain">Abstain</button>
+                </div>
             </div>
         </div>
 
@@ -211,9 +245,9 @@
                 <h3 id="player-action-name">Player Name</h3>
                 <p class="player-card-count">Cards: <span id="player-card-count">0</span></p>
                 <div class="modal-actions player-actions">
-                    <button onclick="hitPlayer()" class="action-btn hit-btn">👊 Hit</button>
-                    <button onclick="showThrowCardDialog()" class="action-btn throw-btn">🃏 Throw Card</button>
-                    <button onclick="showPenaltyDialogForPlayer()" class="action-btn penalty-btn">⚠️ Give Penalty</button>
+                    <button onclick="hitPlayer()" class="action-btn hit-btn">Hit</button>
+                    <button onclick="showThrowCardDialog()" class="action-btn throw-btn">Throw Card</button>
+                    <button onclick="showPenaltyDialogForPlayer()" class="action-btn penalty-btn">Give Penalty</button>
                     <button onclick="closePlayerModal()" class="action-btn cancel-btn">Cancel</button>
                 </div>
             </div>
@@ -270,7 +304,36 @@
         <!-- Settings Modal -->
         <div id="settings-modal" class="modal hidden">
             <div class="modal-content settings-content">
-                <h3>⚙️ Settings</h3>
+                <h3>Settings</h3>
+                <div class="settings-section">
+                    <h4>Keybinds</h4>
+                    <p class="hint">Click a keybind to change it</p>
+                    <div class="keybind-list">
+                        <div class="keybind-item">
+                            <span class="keybind-label">Draw Card</span>
+                            <input type="text" id="keybind-draw" class="keybind-input" readonly onclick="promptKeybind('draw')">
+                        </div>
+                        <div class="keybind-item">
+                            <span class="keybind-label">Knock</span>
+                            <input type="text" id="keybind-knock" class="keybind-input" readonly onclick="promptKeybind('knock')">
+                        </div>
+                        <div class="keybind-item">
+                            <span class="keybind-label">Declare Mao</span>
+                            <input type="text" id="keybind-mao" class="keybind-input" readonly onclick="promptKeybind('mao')">
+                        </div>
+                        <div class="keybind-item">
+                            <span class="keybind-label">Focus Chat</span>
+                            <input type="text" id="keybind-chat" class="keybind-input" readonly onclick="promptKeybind('chat')">
+                        </div>
+                    </div>
+                    <button onclick="resetKeybinds()" class="reset-btn">Reset Defaults</button>
+                </div>
+                <div class="settings-section">
+                    <h4>Penalty Settings</h4>
+                    <div class="form-group">
+                        <label>Default Cards: <input type="number" id="default-penalty-cards" value="1" min="1" max="5" style="width: 60px" onchange="saveDefaultPenaltyCards()"></label>
+                    </div>
+                </div>
                 <div class="settings-section">
                     <h4>Penalty Quick Reasons</h4>
                     <p class="hint">Add common penalty reasons for quick selection</p>
@@ -280,8 +343,38 @@
                         <button onclick="addPenaltyReason()">Add</button>
                     </div>
                 </div>
+                <div class="settings-section">
+                    <h4>Avatar</h4>
+                    <p class="hint">Upload a custom avatar (max 100KB)</p>
+                    <div class="avatar-upload">
+                        <img id="avatar-preview" class="avatar-preview" src="" alt="Your avatar">
+                        <input type="file" id="avatar-input" accept="image/*" onchange="showAvatarCropModal(event)" style="display: none;">
+                        <button onclick="document.getElementById('avatar-input').click()">Choose Image</button>
+                        <button onclick="clearAvatar()" class="clear-btn">Clear</button>
+                    </div>
+                </div>
                 <div class="modal-actions">
                     <button onclick="closeSettingsModal()">Done</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Avatar Crop Modal -->
+        <div id="avatar-crop-modal" class="modal hidden">
+            <div class="modal-content avatar-crop-content">
+                <h3>Adjust Avatar</h3>
+                <p class="hint">Drag to reposition, use scroll or buttons to zoom</p>
+                <div class="avatar-crop-container">
+                    <canvas id="avatar-crop-canvas" class="avatar-crop-canvas"></canvas>
+                </div>
+                <div class="avatar-crop-controls">
+                    <button onclick="avatarCropZoomIn()" class="zoom-btn">Zoom In</button>
+                    <button onclick="avatarCropZoomOut()" class="zoom-btn">Zoom Out</button>
+                    <button onclick="avatarCropReset()" class="zoom-btn">Reset</button>
+                </div>
+                <div class="modal-actions">
+                    <button onclick="applyAvatarCrop()" class="btn primary">Apply</button>
+                    <button onclick="closeAvatarCropModal()" class="btn">Cancel</button>
                 </div>
             </div>
         </div>
@@ -289,16 +382,17 @@
         <!-- Point of Order Modal -->
         <div id="poo-modal" class="modal hidden">
             <div class="modal-content poo-content">
-                <h3>🔴 Point of Order</h3>
+                <h3>Point of Order</h3>
                 <div id="poo-active-info">
                     <p>Reason: <span id="poo-reason"></span></p>
                     <p>Called by: <span id="poo-caller"></span></p>
                 </div>
                 <div class="poo-actions">
-                    <button onclick="viewMyHand()">👁️ View My Hand</button>
-                    <button onclick="shuffleDeck()">🔀 Shuffle Discard</button>
-                    <button onclick="showGameLog()">📜 View Game Log</button>
-                    <button onclick="endPoo()">✓ End Point of Order</button>
+                    <button onclick="viewMyHand()">View My Hand</button>
+                    <button onclick="shuffleDeck()">Shuffle Discard</button>
+                    <button onclick="showGameLog()">View Game Log</button>
+                    <button onclick="showPenaltyDialog()">Give Penalty</button>
+                    <button onclick="endPoo()">End Point of Order</button>
                 </div>
                 <div id="poo-penalty-history" class="penalty-history">
                     <h4>Penalty History</h4>
@@ -313,7 +407,7 @@
         <!-- Game Log Modal -->
         <div id="game-log-modal" class="modal hidden">
             <div class="modal-content">
-                <h3>📜 Game Log</h3>
+                <h3>Game Log</h3>
                 <div id="game-log-content" class="game-log-content"></div>
                 <div class="modal-actions">
                     <button onclick="closeGameLog()">Close</button>
@@ -337,8 +431,9 @@
 
         <!-- Game Over Modal -->
         <div id="game-over-modal" class="modal hidden">
-            <div class="modal-content">
-                <h2>🎉 Game Over! 🎉</h2>
+            <div class="modal-content victory-modal">
+                <img src="/static/mao.jpeg" alt="Mao" class="victory-image">
+                <h2>Game Over!</h2>
                 <p id="winner-text"></p>
                 <button onclick="location.reload()">Play Again</button>
             </div>
